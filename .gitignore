@@ -169,3 +169,4 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+v3_folded_pt_ns.json
