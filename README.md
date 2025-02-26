@@ -1,0 +1,2 @@
+# ergochem
+Ergonomical cheminformatics library
