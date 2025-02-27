@@ -169,5 +169,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Manually ignored
 v3_folded_pt_ns.json
-v3_folded_pt_ns.json
+**__pycache__/

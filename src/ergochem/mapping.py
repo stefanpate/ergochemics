@@ -1,7 +1,11 @@
 from rdkit import Chem
 from rdkit.Chem import rdChemReactions
 import re
-from ergochem.standardize import standardize_mol, standardize_smiles
+from ergochem.standardize import (
+    standardize_rxn,
+    standardize_smiles,
+    fast_tautomerize
+)
 from typing import Iterable
 from pydantic import BaseModel
 from itertools import permutations, product, chain
@@ -25,9 +29,9 @@ class OperatorMapResult(BaseModel):
         next is len(n rc atoms in molecule i)
     '''
     did_map: bool
-    aligned_smarts: str | None
-    atom_mapped_smarts: str | None
-    reaction_center: tuple[tuple[int]] | None
+    aligned_smarts: str | None = None
+    atom_mapped_smarts: str | None = None
+    reaction_center: tuple[tuple[tuple[int, ...], ...], tuple[tuple[int, ...], ...]] | None = None
 
 MAPPING_STANDARDIZATION_DEFAULTS = {
     'do_canon_taut':False,
@@ -58,26 +62,48 @@ def operator_map_reaction(rxn: str, operator: str, matched_idxs=None, max_output
     OperatorMapResult
         Result of mapping. See class for details
     '''
-    # TODO: invoke standardization, custom possible w/ default
     # TODO: incorporate template mapping here? tricky thing is depends on coreactant list
+    # TODO: could think about putting this in a class w/ rules and rxns and not standardizing
+    # every single time rxns * operators
 
+    # TODO: if you want to treat tautomers, the thing to do is to "tautomer expand"
+    # both the reactants and products then do the full mapping over all combos. This way
+    # the operator maps iff the operator can transform some tautomer form of reactants
+    # into some tautomer form of products ! The old way is wrong I believe.
+
+    rxn = standardize_rxn(rxn, **MAPPING_STANDARDIZATION_DEFAULTS)
     rcts, pdts = [elt.split('.') for elt in rxn.split('>>')]
     op_lhs, op_rhs = extract_operator_patts(operator)
 
-    if [len(rcts), len(pdts)] != [len(op_lhs), len(op_rhs)]:
+    if [len(rcts), len(pdts)] != [len(op_lhs), len(op_rhs)]: # First check cardinality
         return OperatorMapResult(did_map=False)
+    
+    # Mark reactant atoms for atom mapping
+    rcts_mol = [Chem.MolFromSmiles(r) for r in rcts]
+    for i, m in enumerate(rcts_mol):
+        for atom in m.GetAtoms():
+            atom.SetIntProp('reactant_idx', i)
+
+    op = rdChemReactions.ReactionFromSmarts(operator) # Make reaction object from smarts string
+    
+    # Preserve mapping of op am numbers to op reactant indices, i.e., which reactant template
+    # each atom map number belongs to (will lose this after running operator)
+    am_to_reactant_idx ={}
+    for ri in range(op.GetNumReactantTemplates()):
+        rt = op.GetReactantTemplate(ri)
+        for atom in rt.GetAtoms():
+            if atom.GetAtomMapNum():
+                am_to_reactant_idx[atom.GetAtomMapNum()] = ri
     
     if matched_idxs is None:
         matched_idxs = permutations([i for i in range(len(rcts))])
 
-    rcts_mol = [Chem.MolFromSmiles(r) for r in rcts]
     lhs_patts = [Chem.MolFromSmarts(l) for l in op_lhs]
     for idx_perm in matched_idxs:
         perm = [rcts_mol[idx] for idx in idx_perm]
+        substruct_matches = [perm[i].GetSubstructMatches(lp) for i, lp in enumerate(lhs_patts)]
 
-        substruct_matches = [perm[i].GetSubstructMatches(lp) for lp, i in enumerate(lhs_patts)]
-
-        if any([len(elt) == 0 for elt in substruct_matches]):
+        if any([len(elt) == 0 for elt in substruct_matches]): # Check if this permutation of reactants matches operator templates
             continue
 
         ss_match_combos = product(*substruct_matches) # All combos of putative rcs of n substrates
@@ -91,15 +117,19 @@ def operator_map_reaction(rxn: str, operator: str, matched_idxs=None, max_output
                 for protect_idx in all_but:
                     perm[j].GetAtomWithIdx(protect_idx).SetProp('_protected', '1')
 
-            outputs = operator.RunReactants(perm, maxProducts=max_outputs)
+            outputs = op.RunReactants(perm, maxProducts=max_outputs)
 
-            op_compare = _compare_operator_outputs_w_products(outputs, pdts)
+            correct_output = _compare_operator_outputs_w_products(outputs, pdts)
 
-            if op_compare is not None:
-                aligned_rcts = ".".join([Chem.MolFromSmiles(m) for m in perm])
-                aligned_pdts = op_compare
-                # TODO: atom map and think thru rc for RHS
-                return OperatorMapResult()
+            if correct_output is not None:
+                aligned_rxn, am_rxn, rhs_rc = _finalize_mapped_reaction(reactants=perm, output=correct_output, am_to_reactant_idx=am_to_reactant_idx)
+                reaction_center = tuple([smc, rhs_rc])
+                return OperatorMapResult(
+                    did_map=True,
+                    aligned_smarts=aligned_rxn,
+                    atom_mapped_smarts=am_rxn,
+                    reaction_center=reaction_center
+                )
 
             # Deprotect & try again
             for j, reactant_rc in enumerate(smc):
@@ -107,95 +137,185 @@ def operator_map_reaction(rxn: str, operator: str, matched_idxs=None, max_output
                 for protect_idx in all_but:
                     perm[j].GetAtomWithIdx(protect_idx).ClearProp('_protected')
 
+    return OperatorMapResult(did_map=False) # Did not map
 
-
-def map_rxn2rule(rxn, rule, return_rc=False, matched_idxs=None, max_products=10000):
+def _compare_operator_outputs_w_products(outputs: tuple[tuple[Chem.Mol]], products: list[str]) -> tuple[Chem.Mol] | None:
     '''
-    Maps reactions to SMARTS-encoded reaction rule.
-    Args:
-        - rxn: Reaction SMARTS string
-        - rule: smarts string
-        - return_rc: Return reaction center
-        - matched_idxs: Indices of reaction reactants in the order they match the smarts
-        reactants templates
-    Returns:
-        - res:dict{
-            did_map:bool
-            aligned_smarts:str | None
-            reaction_center:Tuple[tuple] | None
-        }
+    Compares operator outputs to products and
+    returns the products in the order of the operator outputs.
+    Returns empty list if no match is found.
     '''
-    res = {
-        'did_map':False,
-        'aligned_smarts':None,
-        'reaction_center':None,
-    }
-    reactants, unsorted_products = split_reaction(rxn)
-    
-    products = sorted(unsorted_products) # Canonical ordering for later comparison
-    operator = Chem.rdChemReactions.ReactionFromSmarts(rule) # Make reaction object from smarts string
-    reactants_mol = [Chem.MolFromSmiles(elt) for elt in reactants] # Convert reactant smiles to mol obj
-    rule_substrate_cts = [len(get_patts_from_operator_side(rule, i)) for i in range(2)] # [n_reactants, n_products] in a rule
-    rxn_substrate_cts = [len(reactants), len(products)]
+    srt_prod = tuple(sorted(products))
 
-    # Check if number of reactants / products strictly match
-    # rule to reaction. If not return false
-    if rule_substrate_cts != rxn_substrate_cts:
-        return res
-    
-    # If not enforcing templates,
-    # get all permutations of reactant
-    # indices
-    if matched_idxs is None:
-        matched_idxs = list(permutations([i for i in range(len(reactants))]))
-        
-    # For every permutation of that subset of reactants
-    # TODO: What if there are multiple match idxs that product the right outputs?
-    for idx_perm in matched_idxs:
-        perm = tuple([reactants_mol[idx] for idx in idx_perm]) # Re-order reactants based on allowable idx perms
-        outputs = operator.RunReactants(perm, maxProducts=max_products) # Apply rule to that permutation of reactants
+    for output in outputs:
+        try:
+            output_smi = [(Chem.MolToSmiles(mol), i) for i, mol in enumerate(output)]
+            srt_out_smi, srt_oidx = zip(*sorted(output_smi, key=lambda x: x[0]))
+        except:
+            continue
 
-        if compare_operator_outputs_w_products(outputs, products):
-            res['did_map'] = True
-            res['aligned_smarts'] = ".".join([reactants[idx] for idx in idx_perm]) + ">>" + ".".join(unsorted_products)
-            break # out of permutations-of-matched-idxs loop
+        if srt_out_smi == srt_prod:
+            return output    
 
-    if res['did_map'] and not return_rc: # Mapped and don't want rc
-        return res
+    return None
 
-    elif res['did_map'] and return_rc: # Mapped and want rc
-        patts = get_patts_from_operator_side(rule, 0)
-        patts = [Chem.MolFromSmarts(elt) for elt in patts]
+def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Chem.Mol], am_to_reactant_idx: dict[int, int]) -> tuple[str, str, tuple[tuple[int, ...], tuple[int, ...]]]:
+    '''
+    Args
+    ----
+    reactants:Iterable[Chem.Mol]
+        Reactants. Note: must be aligned to operator LHS
+    output:Iterable[Chem.Mol]
+        Output from operator.RunReactants(reactants) that
+        matches the actual products
+    am_to_reactant_idx:dict[int, int]
+        Mapping of atom map numbers to reactant indices
+        (i.e. which reactant the atom map number belongs to)
+    Returns
+    -------
+    tuple[str, str]
+        Operator aligned reaction without atom mapping
+        Operator aligned reaction with atom mapping
+    '''
+    aligned_no_am = '.'.join([Chem.MolToSmiles(m) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m) for m in output])
 
-        if len(patts) != len(perm):
-            raise Exception("Something wrong. There should be same number of operator fragments as reaction reactants")
-        
-        substruct_matches = [perm[i].GetSubstructMatches(patts[i]) for i in range(len(patts))]
-        ss_match_combos = product(*substruct_matches) # All combos of putative rcs of n substrates
-        all_putative_rc_atoms = [set(chain(*elt)) for elt in substruct_matches] # ith element has set of all putative rc atoms of ith reactant
-
-        for smc in ss_match_combos:
-
-            # Protect all but rc currently considered in each reactant
-            for j, reactant_rc in enumerate(smc):
-                all_but = all_putative_rc_atoms[j] - set(reactant_rc) # To protect: "all but current rc"
-                for protect_idx in all_but:
-                    perm[j].GetAtomWithIdx(protect_idx).SetProp('_protected', '1')
-
-            outputs = operator.RunReactants(perm, maxProducts=max_products) # Run operator with protected atoms
-
-            # If found match
-            if _compare_operator_outputs_w_products(outputs, products):
-                res['reaction_center'] = smc
-                return res
+    am = 1
+    rhs_rc = []
+    for prod in output:
+        prod_rc = []
+        for atom in prod.GetAtoms():
+            atom.SetAtomMapNum(am)
+            props = atom.GetPropsAsDict()
+            rct_atom_idx = props.get('react_atom_idx')
+            rct_idx = props.get('reactant_idx')
             
-            # Deprotect & try again
-            for j, reactant_rc in enumerate(smc):
-                all_but = all_putative_rc_atoms[j] - set(reactant_rc) # To protect: "all but current rc"
-                for protect_idx in all_but:
-                    perm[j].GetAtomWithIdx(protect_idx).ClearProp('_protected')
+            if rct_idx is not None:
+                reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
+            else: # atom part of reaction center <=> lost rct_idx
+                old_am = props.get('old_mapno')
+                rct_idx = am_to_reactant_idx[old_am]
+                reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
+                prod_rc.append(atom.GetIdx())
+            
+            am += 1
 
-    return res # Did not map or failed getting RC
+        rhs_rc.append(prod_rc)
+    
+    aligned_with_am = '.'.join([Chem.MolToSmiles(m) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m) for m in output])
+    rhs_rc = tuple(tuple(elt) for elt in rhs_rc)
+    return aligned_no_am, aligned_with_am, rhs_rc
+
+# TODO: This doesn't need to be a separate function
+def _apply_operator_to_known_rc(op: rdChemReactions.ChemicalReaction, reactants: Iterable[Chem.Mol], lhs_rc: Iterable[Iterable[int]]) -> tuple[tuple[Chem.Mol]]:
+    '''
+    Applies operator to reaction w/ only LHS reaction center unprotected
+    
+    Args
+    ----
+    op:rdChemReactions.ChemicalReaction
+        Operator
+    reactants:Iterable[Chem.Mol]
+        Reactants
+    lhs_rc:Iterable[Iterable[int]]
+        Reaction center indices. Must correspond to order of reactants
+
+    Returns
+    -------
+    tuple[tuple[Chem.Mol]]
+        Ouptput of operator
+    '''
+
+    for r, mol_rc in zip(reactants, lhs_rc):
+        for a in r.GetAtoms():
+            if a.GetIdx() in mol_rc:
+                continue
+            else:
+                a.SetProp('_protected', '1')
+
+    outputs = op.RunReactants(reactants)
+
+    return outputs
+
+# TODO: unify this with helpers above and name something more descriptive
+# of the fact that this requires rc and op
+def atom_map_reaction(rxn: str, rc: Iterable[Iterable[Iterable[int]]], op: str) -> str:
+    '''
+    Label reaction with all atom map numbers. Required that the reaction
+    center and minimal operatoer are already known.
+
+    Args
+    ----
+    rxn:str
+        Reaction SMILES
+    rc:Iterable[Iterable[int]]
+        Reaction center indices. Outer iterable is len 2,
+        next iterable is len n rcts or n prods,
+        next is len(n rc atoms in molecule)
+    op:str
+        Reaction operator
+
+    Returns
+    -------
+    rxn:str
+        Reaction SMILES with atom map numbers
+    '''
+
+    reactants, products = [elt.split('.') for elt in rxn.split('>>')]
+    reactants = [Chem.MolFromSmiles(r) for r in reactants]
+    products = sorted(
+        [
+            standardize_smiles(p, do_canon_taut=False, do_find_parent=False, quiet=True)
+            for p in products
+        ]
+    )
+
+    for i, m in enumerate(reactants):
+        for atom in m.GetAtoms():
+            atom.SetIntProp('reactant_idx', i)
+
+    op = rdChemReactions.ReactionFromSmarts(op)
+    
+    am_to_reactant_idx ={}
+    for ri in range(op.GetNumReactantTemplates()):
+        rt = op.GetReactantTemplate(ri)
+        for atom in rt.GetAtoms():
+            if atom.GetAtomMapNum():
+                am_to_reactant_idx[atom.GetAtomMapNum()] = ri
+
+    outputs = _apply_operator_to_known_rc(op, reactants, rc[0])
+
+    match = False
+    for output in outputs:
+        try:
+            output_smi = sorted([Chem.MolToSmiles(mol) for mol in output])
+        except:
+            continue
+        
+        if output_smi == products:
+            match = True
+            break
+
+    if not match:
+        return None
+
+    am = 1
+    for prod in output:
+        for atom in prod.GetAtoms():
+            props = atom.GetPropsAsDict()
+            atom.SetAtomMapNum(am)
+            rct_atom_idx = props.get('react_atom_idx')
+            rct_idx = props.get('reactant_idx')
+            
+            if rct_idx is not None:
+                reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
+            else:
+                old_am = props.get('old_mapno')
+                rct_idx = am_to_reactant_idx[old_am]
+                reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
+            
+            am += 1
+
+    return '.'.join([Chem.MolToSmiles(m) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m) for m in output])
 
 def extract_operator_patts(smarts: str) -> tuple[tuple[str]]:
     '''
@@ -235,61 +355,42 @@ def extract_operator_patts(smarts: str) -> tuple[tuple[str]]:
 
     return tuple(patts)
 
-def _compare_operator_outputs_w_products(
-        outputs: tuple[tuple[Chem.Mol]],
-        products: list[str],
-        standardization_params: dict[str, bool] = MAPPING_STANDARDIZATION_DEFAULTS
-    ) -> bool:
-    '''
-    Compare operator outputs to products. If mapped, return True.
+if __name__ == '__main__':
+    import json
+    import pandas as pd
+    # Test the function
+    op = '[C:1].[C:2]>>[C:1][C:2]'
+    rxn = 'CCOC.CC>>CCOCC'
+    reactants = [Chem.MolFromSmiles('CCOC'), Chem.MolFromSmiles('CC')]
+    rc = [[[0,], [0,]], []]
+
+
+    with open('v3_folded_pt_ns.json', 'r') as f:
+        data = json.load(f)
+
+    ops = pd.read_csv('minimal1224_all_uniprot.tsv', sep='\t')
+
+    for k, v in data.items():
+        op_name = v['min_rules'][0]
+        op = ops.loc[ops['Name'] == op_name, 'SMARTS'].values[0]
+        rxn = v['smarts']
+        res = operator_map_reaction(rxn=rxn, operator=op, matched_idxs=None)
+
+    for k, v in data.items():
+        op_name = v['min_rules'][0]
+        op = ops.loc[ops['Name'] == op_name, 'SMARTS'].values[0]
+        rxn = v['smarts']
+        rc = v['rcs']
+        am_smarts = atom_map_reaction(rxn, rc, op)
+        if am_smarts is None:
+            print(f"Failed to map {rxn} with operator {op}")
+
     
-    '''
-    # TODO:
+    # am_smarts = atom_map_reaction(rxn, rc, op)
+    print('hold')
 
 
-    # Try WITHOUT tautomer canonicalization
-    for output in outputs:
-        try:
-            output = sorted(
-                [
-                    Chem.MolToSmiles(
-                        standardize_mol(
-                            mol,
-                            do_canon_taut=False,
-                            do_neutralize=False,
-                            do_find_parent=False,
-                            quiet=True
-                        )
-                    )
-                    for mol in output
-                ]
-            )
-        except:
-            continue
-
-        # Compare predicted to actual products. If mapped, return True
-        if output == products: 
-            return True
-        
-    # # Try WITH tautomer canonicalization TODO: unacceptably slow
-    # try:
-    #     products = sorted([_poststandardize(Chem.MolFromSmiles(smi), do_canon_taut=True) for smi in products])
-    # except:
-    #     return False
     
-    # for output in outputs:
-    #     try:
-    #         output = sorted([_poststandardize(mol, do_canon_taut=True) for mol in output]) # Standardize and sort SMILES
-    #     except:
-    #         continue
-
-    #     # Compare predicted to actual products. If mapped, return True
-    #     if output == products: 
-    #         return True
-            
-    return False
-
-
 
 # def match_template(rxn, rule_reactants_template, rule_products_template, smi2paired_cof, smi2unpaired_cof):
 #     '''
@@ -345,150 +446,3 @@ def _compare_operator_outputs_w_products(
 #                     matched_idxs.append(this_idx)
 
 #     return matched_idxs
-
-
-def _apply_operator_to_known_rc(op: rdChemReactions.ChemicalReaction, reactants: Iterable[Chem.Mol], lhs_rc: Iterable[Iterable[int]]) -> tuple[tuple[Chem.Mol]]:
-    '''
-    Applies operator to reaction w/ only LHS reaction center unprotected
-    
-    Args
-    ----
-    op:rdChemReactions.ChemicalReaction
-        Operator
-    reactants:Iterable[Chem.Mol]
-        Reactants
-    lhs_rc:Iterable[Iterable[int]]
-        Reaction center indices. Must correspond to order of reactants
-
-    Returns
-    -------
-    tuple[tuple[Chem.Mol]]
-        Ouptput of operator
-    '''
-
-    for r, mol_rc in zip(reactants, lhs_rc):
-        for a in r.GetAtoms():
-            if a.GetIdx() in mol_rc:
-                continue
-            else:
-                a.SetProp('_protected', '1')
-
-    outputs = op.RunReactants(reactants)
-
-    return outputs
-
-def atom_map_reaction(rxn: str, rc: Iterable[Iterable[Iterable[int]]], op: str) -> str:
-    '''
-    Label reaction with all atom map numbers. Required that the reaction
-    center and minimal operatoer are already known.
-
-    Args
-    ----
-    rxn:str
-        Reaction SMILES
-    rc:Iterable[Iterable[int]]
-        Reaction center indices. Outer iterable is len 2,
-        next iterable is len n rcts or n prods,
-        next is len(n rc atoms in molecule)
-    op:str
-        Reaction operator
-
-    Returns
-    -------
-    rxn:str
-        Reaction SMILES with atom map numbers
-    '''
-
-    reactants, products = [elt.split('.') for elt in rxn.split('>>')]
-    reactants = [Chem.MolFromSmiles(r) for r in reactants]
-    products = sorted(
-        [
-            standardize_smiles(p, do_canon_taut=False, do_find_parent=False, quiet=True)
-            for p in products
-        ]
-    )
-
-    for i, m in enumerate(reactants):
-        for atom in m.GetAtoms():
-            atom.SetIntProp('reactant_idx', i)
-
-    op = rdChemReactions.ReactionFromSmarts(op)
-    
-    am_to_reactant_idx ={}
-    for ri in range(op.GetNumReactantTemplates()):
-        rt = op.GetReactantTemplate(ri)
-        for atom in rt.GetAtoms():
-            if atom.GetAtomMapNum():
-                am_to_reactant_idx[atom.GetAtomMapNum()] = ri
-
-    outputs = _apply_operator_to_known_rc(op, reactants, rc[0])
-
-    match = False
-    for output in outputs:
-        try:
-            output_smi = sorted(
-                Chem.MolToSmiles(
-                    # TODO unify with standardization defaults
-                    [
-                        Chem.MolToSmiles(
-                            standardize_mol(mol, do_canon_taut=False, do_neutralize=False, do_find_parent=False, quiet=True)
-                        )
-                        for mol in output
-                    ]
-                )
-        except:
-            continue
-        
-        if output_smi == products:
-            match = True
-            break
-
-    if not match:
-        return None
-
-    am = 1
-    for prod in output:
-        for atom in prod.GetAtoms():
-            props = atom.GetPropsAsDict()
-            atom.SetAtomMapNum(am)
-            rct_atom_idx = props.get('react_atom_idx')
-            rct_idx = props.get('reactant_idx')
-            
-            if rct_idx is not None:
-                reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
-            else:
-                old_am = props.get('old_mapno')
-                rct_idx = am_to_reactant_idx[old_am]
-                reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
-            
-            am += 1
-
-    return '.'.join([Chem.MolToSmiles(m) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m) for m in output])
-
-if __name__ == '__main__':
-    import json
-    import pandas as pd
-    # Test the function
-    op = '[C:1].[C:2]>>[C:1][C:2]'
-    rxn = 'CCOC.CC>>CCOCC'
-    reactants = [Chem.MolFromSmiles('CCOC'), Chem.MolFromSmiles('CC')]
-    rc = [[[0,], [0,]], []]
-
-
-    with open('v3_folded_pt_ns.json', 'r') as f:
-        data = json.load(f)
-
-    ops = pd.read_csv('minimal1224_all_uniprot.tsv', sep='\t')
-
-    for k, v in data.items():
-        op_name = v['min_rules'][0]
-        op = ops.loc[ops['Name'] == op_name, 'SMARTS'].values[0]
-        rxn = v['smarts']
-        rc = v['rcs']
-        am_smarts = atom_map_reaction(rxn, rc, op)
-        if am_smarts is None:
-            print(f"Failed to map {rxn} with operator {op}")
-
-    
-    # am_smarts = atom_map_reaction(rxn, rc, op)
-    print('hold')

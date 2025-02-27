@@ -1,7 +1,6 @@
 from rdkit import Chem
 from rdkit.Chem import Draw
 
-
 def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool = True) -> str:
     '''
     Draw reaction to svg string
