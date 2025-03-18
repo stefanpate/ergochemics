@@ -2,48 +2,103 @@ from rdkit import Chem
 from rdkit.Chem import rdFMCS
 from copy import deepcopy
 import re
+from typing import Iterable
+from itertools import chain
 
-# TODO: reaction_rcmcs and reaction_rcmcs_score
-
-# def calc_lhs_rcmcs(
-#         rcts_rc1:Iterable,
-#         rcts_rc2:Iterable,
-#         patts:Iterable[str],
-#         norm:str='max'
-#     ):
-#     '''
-#     Calculates atom-weighted reaction rcmcs score of aligned reactions
-#     using only reactants, NOT the products of the reaction.
-
-#     Args
-#     -------
-#     rxn_rc:Iterable of len = 2
-#         rxn_rc[0]:Iterable[str] - Reactant SMILES, aligned to operator
-#         rxn_rc[1]:Iterable[Iterable[int]] - innermost iterables have reaction
-#             center atom indices for a reactant
-#     patts:Iterable[str]
-#         SMARTS patterns of reaction center fragments organized
-#         the same way as rxn_rc[1] except here, one SMARTS string per reactant
-#     '''
-#     smiles = [rcts_rc1[0], rcts_rc2[0]]
-#     rc_idxs = [rcts_rc1[1], rcts_rc2[1]]
-#     molecules= [[Chem.MolFromSmiles(smi) for smi in elt] for elt in smiles]
-#     mol_rcs1, mol_rcs2 = [list(zip(molecules[i], rc_idxs[i])) for i in range(2)]
+# TODO: test
+def rcmcs_score(
+        rxn1: str,
+        rxn2: str,
+        rcs1: Iterable[Iterable[int]],
+        rcs2: Iterable[Iterable[int]],
+        patts: Iterable[str],
+        norm: str ='max',
+        average: str = 'weighted',
+        enforce_ring_membership: bool = False
+    ) -> float:
+    '''
+    Calculates the reaction center max common substructure score
+    between two reactions. Accepts reactions in form 'A.B>>>C.D' 
+    or iterable of reactant / product SMILES. Order of reactants / products
+    in all reactions, reaction centers, and reaction center patterns must match.
     
-#     n_atoms = 0
-#     rcmcs = 0
-#     for mol_rc1, mol_rc2, patt in zip(mol_rcs1, mol_rcs2, patts):
-#         rcmcs_i = calc_molecule_rcmcs(mol_rc1, mol_rc2, patt, norm=norm)
+    Args
+    ----
+    rxn1:str | Iterable[str]
+        Reaction 1 in form 'A.B>>>C.D' or iterable of reactant / product SMILES
+    rxn2:str | Iterable[str]
+        Reaction 2 in form 'A.B>>>C.D' or iterable of reactant / product SMILES
+    rcs1:Iterable[Iterable[int]]
+        Reaction center atom indices for reaction 1
+    rcs2:Iterable[Iterable[int]]
+        Reaction center atom indices for reaction 2
+    patts:Iterable[str]
+        SMARTS patterns of reaction center fragments in order they appear in
+        rxn1 and rxn2 / rcs1 and rcs2
+    norm:str
+        Normalization method for rcmcs score. If 'max', score is divided by
+        # of atoms in the larger reactant. If 'min', score is divided by
+        # of atoms in the smaller reactant.
+    average:str
+        How to average the rcmcs scores of the reactants. If 'weighted',
+        the average is weighted by the number of atoms in each reactant
+        / product. If 'simple', the average is the arithmetic mean.
 
-#         if norm == 'max':
-#             atoms_i = max(mol_rc1[0].GetNumAtoms(), mol_rc2[0].GetNumAtoms())
-#         elif norm == 'min':
-#             atoms_i = min(mol_rc1[0].GetNumAtoms(), mol_rc2[0].GetNumAtoms())
+    Returns
+    -------
+    rcmcs_score:float
+        Reaction center max common subgraph score [0, 1]
+    '''
+    if norm not in ['max', 'min']:
+        raise ValueError("Normalization must be 'max' or 'min'")
+    
+    if average not in ['weighted', 'simple']:
+        raise ValueError("Average must be 'weighted' or 'simple'")
+    
+    if ">>" in rxn1:
+        rxn1 = list(chain(*[side.split('.') for side in rxn1.split(">>")]))
+
+    if ">>" in rxn2:
+        rxn2 = list(chain(*[side.split('.') for side in rxn2.split(">>")]))
+
+    len_set = set()
+    len_set.add(len(rcs1))
+    len_set.add(len(rcs2))
+    len_set.add(len(patts))
+    len_set.add(len(rxn1))
+    len_set.add(len(rxn2))
+
+    if len(len_set) != 1:
+        raise ValueError("Number of reactants / products, reaction centers, and reaction center patterns do not match")
+    
+    n_atoms = 0
+    rcmcs = 0
+    n_mols = 0
+    for smi1, smi2, rc1, rc2, patt in zip(rxn1, rxn2, rcs1, rcs2, patts):
+        mol1 = Chem.MolFromSmiles(smi1)
+        mol2 = Chem.MolFromSmiles(smi2)
+        rcmcs_i = molecule_rcmcs_score([mol1, mol2], [rc1, rc2], patt, norm=norm, enforce_ring_membership=enforce_ring_membership)
+
+        n1 = mol1.GetNumAtoms()
+        n2 = mol2.GetNumAtoms()
+
+        if norm == 'max':
+            atoms_i = max(n1, n2)
+        elif norm == 'min':
+            atoms_i = min(n1, n2)
+
+        if average == 'weighted':
+            rcmcs += rcmcs_i * atoms_i
+        elif average == 'simple':
+            rcmcs += rcmcs_i
         
-#         rcmcs += rcmcs_i * atoms_i
-#         n_atoms += atoms_i
+        n_mols += 1
+        n_atoms += atoms_i
 
-#     return rcmcs / n_atoms
+    if average == 'weighted':
+        return rcmcs / n_atoms
+    elif average == 'simple':
+        return rcmcs / n_mols
 
 def molecule_rcmcs_score(mols: list[Chem.Mol], rcs: list[tuple[int]], patt:str, norm='max', enforce_ring_membership: bool = False):
     '''

@@ -185,7 +185,8 @@ def fast_tautomerize(smiles: str) -> list[str]:
     Args
     ----
     smiles:str
-        SMILES string to standardize.
+        SMILES string to tautomerize.
+    
     Returns
     -------
     tautomers:Iterable[str]

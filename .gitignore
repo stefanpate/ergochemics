@@ -173,3 +173,4 @@ cython_debug/
 # Manually ignored
 v3_folded_pt_ns.json
 **__pycache__/
+.vscode/
