@@ -191,7 +191,7 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
             
             if rct_idx is not None:
                 reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
-            else: # atom part of reaction center <=> lost rct_idx
+            else: # atom part of reaction center <=> lost rct_idx TODO: this logic only holds when only the reaction center described in the operator!! 
                 old_am = props.get('old_mapno')
                 rct_idx = am_to_reactant_idx[old_am]
                 reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)

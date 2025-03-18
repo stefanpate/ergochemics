@@ -2,6 +2,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit import rdBase
 from rdkit.Chem.MolStandardize import rdMolStandardize
+from copy import deepcopy
 
 def _handle_kwargs(**kwargs):
     default_kwargs = {
@@ -45,6 +46,7 @@ def standardize_mol(mol: Chem.Mol, **kwargs) -> Chem.Mol:
         Standardized molecule.
     '''
     kwargs = _handle_kwargs(**kwargs)
+    mol = deepcopy(mol) # Defensive copy
 
     if kwargs['quiet']:
         _ = rdBase.BlockLogs()

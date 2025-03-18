@@ -8,3 +8,6 @@ Description-Content-Type: text/markdown
 Requires-Dist: pandas>=2.2.3
 Requires-Dist: pydantic>=2.10.6
 Requires-Dist: rdkit>=2024.9.5
+
+# ergochem
+Ergonomical cheminformatics library
