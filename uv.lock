@@ -11,7 +11,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ergochem"
+name = "ergochemics"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -22,7 +22,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "ergochem" },
+    { name = "ergochemics" },
 ]
 
 [package.metadata]
@@ -33,7 +33,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ergochem", editable = "." }]
+dev = [{ name = "ergochemics", editable = "." }]
 
 [[package]]
 name = "numpy"

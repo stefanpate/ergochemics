@@ -5,7 +5,7 @@ from typing import Iterable
 from pydantic import BaseModel
 from itertools import permutations, product, chain
 from functools import lru_cache
-from ergochem.standardize import (
+from ergochemics.standardize import (
     standardize_rxn,
     fast_tautomerize
 )

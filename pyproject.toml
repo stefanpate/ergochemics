@@ -1,7 +1,7 @@
 [project]
-name = "ergochem"
+name = "ergochemics"
 version = "0.1.0"
-description = "Add your description here"
+description = "Ergonomical cheminformatics library"
 readme = "README.md"
 authors = [
     { name = "stefanpate", email = "stefanpate94@gmail.com" }
@@ -17,10 +17,10 @@ dependencies = [
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
-[tool.uv.sources]
-ergochem = { workspace = true }
-
 [dependency-groups]
 dev = [
-    "ergochem",
+    "ergochemics",
 ]
+
+[tool.uv.sources]
+ergochemics = { workspace = true }
