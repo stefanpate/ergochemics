@@ -145,7 +145,7 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
                 correct_output = _compare_operator_outputs_w_products(outputs, taut_pdts)
 
                 if correct_output is not None:
-                    aligned_rxn, am_rxn, rhs_rc = _finalize_mapped_reaction(reactants=perm, output=correct_output, am_to_reactant_idx=am_to_reactant_idx)
+                    aligned_rxn, am_rxn, rhs_rc = _finalize_mapped_reaction(reactants=perm, output=correct_output, permuted_idxs=idx_perm, am_to_reactant_idx=am_to_reactant_idx)
                     reaction_center = tuple([smc, rhs_rc])
                     return OperatorMapResult(
                         did_map=True,
@@ -182,23 +182,28 @@ def _compare_operator_outputs_w_products(outputs: tuple[tuple[Chem.Mol]], produc
 
     return None
 
-def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Chem.Mol], am_to_reactant_idx: dict[int, int]) -> tuple[str, str, tuple[tuple[int, ...], tuple[int, ...]]]:
+def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Chem.Mol], permuted_idxs: list[int], am_to_reactant_idx: dict[int, int]) -> tuple[str, str, tuple[tuple[int, ...], tuple[int, ...]]]:
     '''
     Args
     ----
     reactants:Iterable[Chem.Mol]
-        Reactants. Note: must be aligned to operator LHS
+        Reactants. Note: must be ordered as they match
+        lhs operator templates
     output:Iterable[Chem.Mol]
         Output from operator.RunReactants(reactants) that
         matches the actual products
+    permuted_idxs:list[int]
+        Original indices of reactants in reaction,
+        permuted to match the operator
     am_to_reactant_idx:dict[int, int]
         Mapping of atom map numbers to reactant indices
         (i.e. which reactant the atom map number belongs to)
     Returns
     -------
-    tuple[str, str]
+    :tuple[str, str, tuple[tuple[int, ...], tuple[int, ...]]]
         Operator aligned reaction without atom mapping
-        Operator aligned reaction with atom mapping
+        Operator aligned reaction WITH atom mapping
+        Reaction center indices
     '''
     aligned_no_am = '.'.join([Chem.MolToSmiles(m) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m) for m in output])
 
@@ -213,7 +218,7 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
             rct_idx = props.get('reactant_idx')
             
             if rct_idx is not None:
-                reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
+                reactants[permuted_idxs[rct_idx]].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
             else:
                 old_am = props.get('old_mapno')
                 rct_idx = am_to_reactant_idx[old_am]
