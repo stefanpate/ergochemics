@@ -85,9 +85,6 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
         Reaction SMILES
     operator:str
         Reaction operator in SMARTS
-    matched_idxs:Iterable[Iterable[int]]
-        Permutation of reactant indices such that
-        reactants match lhs molecular templates
     max_outputs:int
         Maximum number of outputs to generate w/ operator
 
