@@ -1,5 +1,5 @@
 from rdkit import Chem
-from rdkit.Chem import Draw
+from rdkit.Chem import Draw, rdChemReactions
 
 def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool = True) -> str:
     '''
@@ -15,7 +15,7 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
         If True, is more explicit about double
         bond location in drawing
     '''
-    rxn = Chem.rdChemReactions.ReactionFromSmarts(rxn, useSmiles=use_smiles)
+    rxn = rdChemReactions.ReactionFromSmarts(rxn, useSmiles=use_smiles)
     return Draw.ReactionToImage(rxn, useSVG=True, subImgSize=sub_img_size)
 
 def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_atoms: tuple = tuple(), draw_options: dict = {}) -> str:
