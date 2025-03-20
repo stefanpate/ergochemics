@@ -93,7 +93,12 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
     OperatorMapResult
         Result of mapping. See class for details
     '''
-    rxn = _m_standardize_reaction(rxn, **MAPPING_STANDARDIZATION_DEFAULTS)
+    try:
+        rxn = _m_standardize_reaction(rxn, **MAPPING_STANDARDIZATION_DEFAULTS)
+    except:
+        print(f"Error standardizing reaction: {rxn}")
+        return OperatorMapResult(did_map=False)
+    
     rcts, pdts = [elt.split('.') for elt in rxn.split('>>')]
     op_lhs, op_rhs = extract_operator_patts(operator)
 
@@ -104,8 +109,13 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
 
     for taut_rcts, taut_pdts in _tautomer_expand(rcts, pdts): # Iterate over tautomer combinations
         
-        # Mark reactant atoms for atom mapping
         rcts_mol = [Chem.MolFromSmiles(r) for r in taut_rcts]
+
+        if any([m is None for m in rcts_mol]):
+            print(f"Error parsing tautomerized reactant for: {rxn}")
+            continue
+
+        # Mark reactant atoms for atom mapping
         for i, m in enumerate(rcts_mol):
             for atom in m.GetAtoms():
                 atom.SetIntProp('reactant_idx', i)
@@ -218,7 +228,7 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
             rct_idx = props.get('reactant_idx')
             
             if rct_idx is not None:
-                reactants[permuted_idxs[rct_idx]].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
+                reactants[permuted_idxs.index(rct_idx)].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
             else:
                 old_am = props.get('old_mapno')
                 rct_idx = am_to_reactant_idx[old_am]
