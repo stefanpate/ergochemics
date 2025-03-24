@@ -239,7 +239,7 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
 
         rhs_rc.append(prod_rc)
     
-    aligned_with_am = '.'.join([Chem.MolToSmiles(m) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m) for m in output])
+    aligned_with_am = '.'.join([Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in output])
     rhs_rc = tuple(tuple(elt) for elt in rhs_rc)
     return aligned_no_am, aligned_with_am, rhs_rc
 
