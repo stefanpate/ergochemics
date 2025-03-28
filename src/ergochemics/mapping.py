@@ -281,6 +281,38 @@ def extract_operator_patts(smarts: str) -> tuple[tuple[str]]:
 
     return tuple(patts)
 
+def rc_to_str(rc: Iterable[Iterable[Iterable[int]]]) -> str:
+    '''
+    Convert nested tuple representation of reaction center to string representation.
+    '''
+    return ">>".join(
+        [
+            ";".join(
+                [
+                    ",".join(
+                    [str(aidx) for aidx in mol]
+                    )
+                    for mol in side
+                ]
+            )
+            for side in rc
+        ]
+    )
+
+def rc_to_nest(rc: str) -> tuple[tuple[tuple[int]]]:
+    '''
+    Convert string representation of reaction center to nested tuple representation.
+    '''
+    return tuple(
+        tuple(
+            tuple(
+                int(aidx) for aidx in mol.split(",") if aidx != ""
+            )
+            for mol in side.split(";")
+        )
+        for side in rc.split(">>")
+    )
+
 if __name__ == '__main__':
     import json
     import pandas as pd
