@@ -15,7 +15,9 @@ def _handle_kwargs(**kwargs):
     }
     filtered_kwargs = {k : v for k, v in kwargs.items() if k in default_kwargs}
     default_kwargs.update(filtered_kwargs)
+    
     return default_kwargs
+
 
 
 def standardize_mol(mol: Chem.Mol, **kwargs) -> Chem.Mol:
@@ -105,6 +107,7 @@ def standardize_smiles(smiles:str, **kwargs) -> str:
         mol,
         **kwargs
     )
+    
     return Chem.MolToSmiles(mol)
 
 def standardize_rxn(rxn: str, **kwargs) -> str:
@@ -138,10 +141,12 @@ def standardize_rxn(rxn: str, **kwargs) -> str:
     rcts, pdts = [side.split('.') for side in rxn.split('>>')]
     rcts = [standardize_smiles(r, **kwargs) for r in rcts]
     pdts = [standardize_smiles(p, **kwargs) for p in pdts]
+    
     return f"{'.'.join(rcts)}>>{'.'.join(pdts)}"
 
 def neutralize_charges(mol: Chem.Mol) -> Chem.Mol:
-    """Neutralize all charges in an rdkit mol.
+    """
+    Neutralize atom charges in an rdkit mol, as many as possible
 
     Args
     ----
@@ -153,26 +158,17 @@ def neutralize_charges(mol: Chem.Mol) -> Chem.Mol:
     mol : rdkit.Chem.rdchem.Mol
         Neutralized molecule.
     """
-    patts = (
-        ("[n+;H]", "n"), # Imidazoles
-        ("[N+;!H0]", "N"), # Amines
-        ("[$([O-]);!$([O-][#7])]", "O"), # Carboxylic acids and alcohols
-        ("[S-;X1]", "S"), # Thiols
-        ("[$([N-;X2]S(=O)=O)]", "N"), # Sulfonamides
-        ("[$([N-;X2][C,N]=C)]", "N"), # Enamines
-        ("[n-]", "[nH]"), # Tetrazoles
-        ("[$([S-]=O)]", "S"), # Sulfoxides
-        ("[$([N-]C=O)]", "N"), # Amides
-    )
-
-    reactions = [
-        (AllChem.MolFromSmarts(x), AllChem.MolFromSmiles(y, False)) for x,y in patts
-    ]
-
-    for (reactant, product) in reactions:
-        while mol.HasSubstructMatch(reactant):
-            rms = AllChem.ReplaceSubstructs(mol, reactant, product)
-            mol = rms[0]
+    pattern = Chem.MolFromSmarts("[+1!h0!$([*]~[-1,-2,-3,-4]),-1!$([*]~[+1,+2,+3,+4])]")
+    at_matches = mol.GetSubstructMatches(pattern)
+    at_matches_list = [y[0] for y in at_matches]
+    for at_idx in at_matches_list:
+        atom = mol.GetAtomWithIdx(at_idx)
+        chg = atom.GetFormalCharge()
+        hcount = atom.GetTotalNumHs()
+        atom.SetFormalCharge(0)
+        atom.SetNumExplicitHs(hcount - chg)
+        atom.UpdatePropertyCache()
+    
     return mol
 
 
@@ -209,4 +205,5 @@ def fast_tautomerize(smiles: str) -> list[str]:
         tautomer_mols.extend([o[0] for o in outputs])
 
     tautomer_smiles = [Chem.MolToSmiles(m) for m in tautomer_mols]
+    
     return [smiles] + list(set(tautomer_smiles))
