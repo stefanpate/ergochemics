@@ -281,15 +281,12 @@ def extract_operator_patts(smarts: str) -> tuple[tuple[str]]:
 
     return tuple(patts)
 
-def rc_to_str(rc: Iterable[Iterable[Iterable[int]]] | Iterable[Iterable[int]]) -> str:
+def rc_to_str(rc: Iterable[Iterable[Iterable[int]]]) -> str:
     '''
     Convert nested tuple representation of reaction center to string representation.
     If rc is a 2-level nested tuple, it is assumed this corresponds to the left-hand side 
     of the reaction.
     '''
-    if type(rc[0][0]) == int:
-        rc = [rc, [[]]]
-    
     return ">>".join(
         [
             ";".join(
