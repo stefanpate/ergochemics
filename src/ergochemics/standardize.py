@@ -247,3 +247,9 @@ def fast_tautomerize(smiles: str) -> list[str]:
     tautomer_smiles = [Chem.MolToSmiles(m) for m in tautomer_mols]
     
     return [smiles] + list(set(tautomer_smiles))
+
+if __name__ == "__main__":
+    smi = 'O=C(O)CC[c-]1[nH]cnc1=O'
+
+    print(standardize_smiles(smi))
+    print(standardize_smiles(smi, neutralization_method="simple"))
