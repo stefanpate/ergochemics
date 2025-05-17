@@ -38,6 +38,7 @@ MAPPING_STANDARDIZATION_DEFAULTS = {
     'do_neutralize':True,
     'do_find_parent':False,
     'do_remove_stereo':True,
+    "neutralization_method": "simple",
     'quiet': False,
 }
 

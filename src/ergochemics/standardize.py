@@ -10,6 +10,7 @@ def _handle_kwargs(**kwargs):
         'do_neutralize':True,
         'do_find_parent':True,
         'do_remove_stereo':True,
+        "neutralization_method": "full",
         'max_tautomers':50,
         'quiet': False,
     }
@@ -17,8 +18,6 @@ def _handle_kwargs(**kwargs):
     default_kwargs.update(filtered_kwargs)
     
     return default_kwargs
-
-
 
 def standardize_mol(mol: Chem.Mol, **kwargs) -> Chem.Mol:
     '''
@@ -30,17 +29,21 @@ def standardize_mol(mol: Chem.Mol, **kwargs) -> Chem.Mol:
         Molecule to standardize.
     kwargs:dict
         Keyword arguments to pass to the standardization functions.
-        - do_canon_taut:bool
+        - do_canon_taut:bool = False
             Whether to return canonical tautomer
-        - do_neutralize:bool
+        - do_neutralize:bool = True
             Whether to neutralize charges
-        - do_find_parent:bool
+        - do_find_parent:bool = True
             Whether to find the parent molecule
-        - do_remove_stereo:bool
+        - do_remove_stereo:bool = True
             Whether to remove stereochemistry
-        - max_tautomers:int
+        - neutralization_method:str = "full"
+            Method to use for neutralization, "full" or "simple".
+            "full" neutralization preserves atom map numbers, "simple" does not.
+            "full" neutralization may lead to Kekulization issues downstream.
+        - max_tautomers:int = 50
             Maximum number of tautomers to generate
-        - quiet:bool
+        - quiet:bool = False
             Whether to suppress warnings
     Returns
     -------
@@ -64,8 +67,10 @@ def standardize_mol(mol: Chem.Mol, **kwargs) -> Chem.Mol:
     if kwargs['do_find_parent']:
         mol = rdMolStandardize.FragmentParent(mol)
 
-    if kwargs['do_neutralize']:
-        mol = neutralize_charges(mol) # Remove charges on atoms matching common patterns
+    if kwargs['do_neutralize'] and kwargs['neutralization_method'] == "full":
+        mol = neutralize_charges(mol) # Remove all charges
+    elif kwargs['do_neutralize'] and kwargs['neutralization_method'] == "simple":
+        mol = simple_neutralize_charges(mol)
 
     # Enumerate tautomers and choose canonical one
     if kwargs['do_canon_taut']:
@@ -171,6 +176,41 @@ def neutralize_charges(mol: Chem.Mol) -> Chem.Mol:
     
     return mol
 
+def simple_neutralize_charges(mol: Chem.Mol) -> Chem.Mol:
+    """
+    Neutralize common charge patterns in organic molecules.
+
+    Args
+    ----
+    mol : rdkit.Chem.rdchem.Mol
+        Molecule to neutralize.
+
+    Returns
+    -------
+    mol : rdkit.Chem.rdchem.Mol
+        Neutralized molecule.
+    """
+    patts = (
+        ("[n+;H]", "n"), # Imidazoles
+        ("[N+;!H0]", "N"), # Amines
+        ("[$([O-]);!$([O-][#7])]", "O"), # Carboxylic acids and alcohols
+        ("[S-;X1]", "S"), # Thiols
+        ("[$([N-;X2]S(=O)=O)]", "N"), # Sulfonamides
+        ("[$([N-;X2][C,N]=C)]", "N"), # Enamines
+        ("[n-]", "[nH]"), # Tetrazoles
+        ("[$([S-]=O)]", "S"), # Sulfoxides
+        ("[$([N-]C=O)]", "N"), # Amides
+    )
+
+    reactions = [
+        (AllChem.MolFromSmarts(x), AllChem.MolFromSmiles(y, False)) for x,y in patts
+    ]
+
+    for (reactant, product) in reactions:
+        while mol.HasSubstructMatch(reactant):
+            rms = AllChem.ReplaceSubstructs(mol, reactant, product)
+            mol = rms[0]
+    return mol
 
 def fast_tautomerize(smiles: str) -> list[str]:
     '''
