@@ -5,6 +5,7 @@ from typing import Iterable
 from pydantic import BaseModel
 from itertools import permutations, product, chain
 from functools import lru_cache
+import numpy as np
 from ergochemics.standardize import (
     standardize_rxn,
     fast_tautomerize
@@ -325,6 +326,58 @@ def rc_to_nest(rc: str) -> tuple[tuple[tuple[int]]]:
         )
         for side in rc.split(">>")
     )
+
+def get_reaction_center(am_rxn: str) -> list[list[list[int]], list[list[int]]]:
+    '''
+    Get reaction center from reaction SMARTS with atom mapping.
+    
+    Args
+    ----
+    am_rxn:str
+        Reaction SMARTS with atom mapping. Must be in the form of
+        "R1.R2>>P1.P2" where R1 and R2 are reactants and P1 and P2 are products.
+    
+    Returns
+    -------
+    list[list[list[int]], list[list[int]]]
+        Reaction center indices. Outer iterable is len 2,
+        next iterable is len n rcts or n prods,
+        next is len(n rc atoms in molecule i)
+    '''
+
+    sides = [elt.split('.') for elt in am_rxn.split('>>')]
+    amn_to_midx_aidx = [] # Atom map num to mol idx, atom idx for lhs, rhs
+    adj_mats = []
+    for side in sides:
+        tmp = {}
+        for midx, smi in enumerate(side):
+            mol = Chem.MolFromSmiles(smi)
+            for atom in mol.GetAtoms():
+                tmp[atom.GetAtomMapNum()] = (midx, atom.GetIdx())
+        
+        amn_to_midx_aidx.append(tmp)
+
+        block_smi = ".".join(side)
+        block_mol = Chem.MolFromSmiles(block_smi)
+        block_aidx_to_amn = {atom.GetIdx(): atom.GetAtomMapNum() for atom in block_mol.GetAtoms()}
+        A = Chem.GetAdjacencyMatrix(mol=block_mol, useBO=True)
+        srt_idx = sorted([i for i in range(A.shape[0])], key=lambda x : block_aidx_to_amn[x])
+        A = A[:, srt_idx][srt_idx]
+        adj_mats.append(A)
+
+    D = np.abs(adj_mats[1] - adj_mats[0])
+    if len(amn_to_midx_aidx[0].keys() ^ amn_to_midx_aidx[1].keys()) != 0:
+        raise ValueError("LHS and RHS atom maps do not perfectly intersect")
+
+    rc_amns = np.flatnonzero(D.sum(axis=1)) + 1
+    
+    reaction_center = [[[] for _ in range(len(side))] for side in sides]
+    for amn in rc_amns:
+        for side_idx, lookup in enumerate(amn_to_midx_aidx):
+            midx, aidx = lookup[amn]
+            reaction_center[side_idx][midx].append(aidx)
+
+    return reaction_center
 
 if __name__ == '__main__':
     import json
