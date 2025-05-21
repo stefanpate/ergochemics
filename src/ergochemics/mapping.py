@@ -219,9 +219,8 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
     aligned_no_am = '.'.join([Chem.MolToSmiles(m) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m) for m in output])
 
     am = 1
-    rhs_rc = []
+    rhs_am_rc = []
     for prod in output:
-        prod_rc = []
         for atom in prod.GetAtoms():
             atom.SetAtomMapNum(am)
             props = atom.GetPropsAsDict()
@@ -234,14 +233,25 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
                 old_am = props.get('old_mapno')
                 rct_idx = am_to_reactant_idx[old_am]
                 reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
-                prod_rc.append(atom.GetIdx())
-            
+                rhs_am_rc.append(atom.GetAtomMapNum())
+                
             am += 1
 
-        rhs_rc.append(prod_rc)
-    
-    aligned_with_am = '.'.join([Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in reactants]) + '>>' + '.'.join([Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in output])
-    rhs_rc = tuple(tuple(elt) for elt in rhs_rc)
+    # Reaction.RunReactants() outputs do not have atoms ordered according to their
+    # canonical SMILES ordering. Must go back and forth betweeen SMILES and mol, 
+    # then label according to atom map numbers
+    rhs_am_smiles = [Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in output]
+    rhs_am_recap = [Chem.MolFromSmiles(smi) for smi in rhs_am_smiles]
+    rhs_rc = []
+    for mol in rhs_am_recap:
+        inner_rc = []
+        for atom in mol.GetAtoms():
+            if atom.GetAtomMapNum() in rhs_am_rc:
+                inner_rc.append(atom.GetIdx())
+        rhs_rc.append(tuple(inner_rc))
+    rhs_rc = tuple(rhs_rc)
+
+    aligned_with_am = '.'.join([Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in reactants]) + '>>' + '.'.join(rhs_am_smiles)
     return aligned_no_am, aligned_with_am, rhs_rc
 
 def extract_operator_patts(smarts: str) -> tuple[tuple[str]]:
