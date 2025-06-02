@@ -3,7 +3,7 @@ from rdkit.Chem import rdChemReactions
 import re
 from typing import Iterable
 from pydantic import BaseModel
-from itertools import permutations, product, chain
+from itertools import permutations, product, chain, accumulate
 from functools import lru_cache
 import numpy as np
 from ergochemics.standardize import (
@@ -327,7 +327,7 @@ def rc_to_nest(rc: str) -> tuple[tuple[tuple[int]]]:
         for side in rc.split(">>")
     )
 
-def get_reaction_center(am_rxn: str) -> list[list[list[int]], list[list[int]]]:
+def get_reaction_center(am_rxn: str, mode: str = "separate") -> list[list[list[int]], list[list[int]]] | list[list[int], list[int]]:
     '''
     Get reaction center from reaction SMARTS with atom mapping.
     
@@ -336,26 +336,43 @@ def get_reaction_center(am_rxn: str) -> list[list[list[int]], list[list[int]]]:
     am_rxn:str
         Reaction SMARTS with atom mapping. Must be in the form of
         "R1.R2>>P1.P2" where R1 and R2 are reactants and P1 and P2 are products.
+    mode:str
+        Mode of operation. If "separate", returns reaction center indices
+        for reactants and products separately. If "combined", returns a single
+        list of reaction center indices for each side of the reaction.
     
     Returns
     -------
-    list[list[list[int]], list[list[int]]]
-        Reaction center indices. Outer iterable is len 2,
-        next iterable is len n rcts or n prods,
-        next is len(n rc atoms in molecule i)
+    list[list[list[int]], list[list[int]]] | list[list[int], list[int]]
+        If mode is "separate", returns a list of lists of lists of reaction center indices
+        for each molecule for each side of the reaction.
+        If mode is "combined", returns a list of lists of reaction center indices for each side of the reaction,
+        treating each side as a combined, disjoint molecule.
+
+    Notes
+    -----
+    rdkit Chem.MolFromSmiles() indexes atoms in the order they appear in the SMILES string. This
+    is true whether the SMILES string has multiple molecules or not.
     '''
+    if mode not in ["separate", "combined"]:
+        raise ValueError("Mode must be 'separate' or 'combined'")
 
     sides = [elt.split('.') for elt in am_rxn.split('>>')]
     amn_to_midx_aidx = [] # Atom map num to mol idx, atom idx for lhs, rhs
     adj_mats = []
+    offsets = []
     for side in sides:
         tmp = {}
+        n_atoms = []
         for midx, smi in enumerate(side):
             mol = Chem.MolFromSmiles(smi)
+            n_atoms.append(mol.GetNumAtoms())
+            
             for atom in mol.GetAtoms():
                 tmp[atom.GetAtomMapNum()] = (midx, atom.GetIdx())
         
         amn_to_midx_aidx.append(tmp)
+        offsets.append([0] + list(accumulate(n_atoms)))
 
         block_smi = ".".join(side)
         block_mol = Chem.MolFromSmiles(block_smi)
@@ -366,16 +383,24 @@ def get_reaction_center(am_rxn: str) -> list[list[list[int]], list[list[int]]]:
         adj_mats.append(A)
 
     D = np.abs(adj_mats[1] - adj_mats[0])
+
     if len(amn_to_midx_aidx[0].keys() ^ amn_to_midx_aidx[1].keys()) != 0:
         raise ValueError("LHS and RHS atom maps do not perfectly intersect")
 
     rc_amns = np.flatnonzero(D.sum(axis=1)) + 1
     
-    reaction_center = [[[] for _ in range(len(side))] for side in sides]
-    for amn in rc_amns:
-        for side_idx, lookup in enumerate(amn_to_midx_aidx):
-            midx, aidx = lookup[amn]
-            reaction_center[side_idx][midx].append(aidx)
+    if mode == "separate":
+        reaction_center = [[[] for _ in range(len(side))] for side in sides]
+        for amn in rc_amns:
+            for side_idx, lookup in enumerate(amn_to_midx_aidx):
+                midx, aidx = lookup[amn]
+                reaction_center[side_idx][midx].append(aidx)
+    elif mode == "combined":
+        reaction_center = [[], []]
+        for amn in rc_amns:
+            for side_idx, lookup in enumerate(amn_to_midx_aidx):
+                midx, aidx = lookup[amn]
+                reaction_center[side_idx].append(aidx + offsets[side_idx][midx])
 
     return reaction_center
 
