@@ -361,18 +361,26 @@ class MolFeaturizer:
         
         Notes
         -----
-        1. Distance to reaction center are always the last n features where n is number of reaction center atoms.
-        2. If atom is not connected to an rc atom, distance is set to -1.
+        1. Min distance to reaction center always the last feature.
+        2. If atom is not connected to an rc atom, distance is set to 10_000
         '''
         fts = []
         for atom in mol.GetAtoms():
             aidx = atom.GetIdx()
             local_fts = self.atom_featurizer(atom)
-            spls = [
-                len(Chem.GetShortestPath(mol, aidx, rcidx)) - 1 if aidx != rcidx else 0
-                for rcidx in rc
-            ]
-            fts.append(local_fts + spls)
+            min_dist = 10_000  # default for disconnected atoms
+            for rcidx in rc:
+                if aidx == rcidx:
+                    min_dist = 0
+                    break
+                else:
+                    dist = len(Chem.GetShortestPath(mol, aidx, rcidx)) - 1
+                    if dist < 0:
+                        continue
+                    elif dist < min_dist:
+                        min_dist = dist
+
+            fts.append(local_fts + [min_dist])
 
         fts = np.array(fts)
         return fts
@@ -411,7 +419,7 @@ class MorganFingerprinter:
         if rc_dist_ub is not None:
             root_atoms = [
                 i for i, ft in enumerate(feats)
-                if min(ft[-len(reaction_center):]) <= rc_dist_ub
+                if ft[-1] <= rc_dist_ub
             ]       
             feats = [self.hash_features(tuple(ft.tolist())) for ft in feats]
             return self._fingerprint[output_type](mol, customAtomInvariants=feats, fromAtoms=root_atoms)
@@ -444,3 +452,17 @@ class MorganFingerprinter:
             return self._additional_ouput.GetAtomToBits()
         else:
             return tuple()
+        
+if __name__ == '__main__':
+    sma1 = "NC(=O)C1=CN(C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(OP(=O)(O)O)C3O)C(O)C2O)C=CC1.O=C(O)CCC(=O)C(=O)O"
+    sma2 = "NC(=O)C1=CN(C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(OP(=O)(O)O)C3O)C(O)C2O)C=CC1.O=C(O)CCC(=O)C(=O)O"
+    rc1 = [3, 47, 46, 45, 5, 4, 50, 49]
+    rc2 = [3, 4, 5, 45, 46, 47, 49, 50]
+    mfper = MorganFingerprinter(
+        radius=2,
+        length=2048,
+        mol_featurizer=MolFeaturizer(),
+    )
+    fp1 = mfper.fingerprint(Chem.MolFromSmiles(sma1), rc1, rc_dist_ub=1)
+    fp2 = mfper.fingerprint(Chem.MolFromSmiles(sma2), rc2, rc_dist_ub=1)
+    print(np.allclose(fp1, fp2))  # Should be True if fingerprints are equal
