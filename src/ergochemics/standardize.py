@@ -3,6 +3,7 @@ from rdkit.Chem import AllChem
 from rdkit import rdBase
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from copy import deepcopy
+import hashlib
 
 def _handle_kwargs(**kwargs):
     default_kwargs = {
@@ -248,8 +249,47 @@ def fast_tautomerize(smiles: str) -> list[str]:
     
     return [smiles] + list(set(tautomer_smiles))
 
+def hash_compound(cpd: str) -> str:
+    """
+    Generate a hash for a compound based on its SMILES representation.
+
+    Args
+    ----
+    smiles:str
+        SMILES string of the compound.
+
+    Returns
+    -------
+    hash:str
+        SHA-1 hash of the SMILES string.
+    """
+    return hashlib.sha1(cpd.encode('utf-8')).hexdigest()
+
+def hash_reaction(rxn: str) -> str:
+    """
+    Generate a hash for a reaction based on its SMILES representation.
+
+    Args
+    ----
+    rxn:str
+        Reaction string in the format 'reactant.reactant>>product.product'.
+
+    Returns
+    -------
+    hash:str
+        SHA-1 hash of the reaction string.
+    """
+    lhs, rhs = [side.split('.') for side in rxn.split('>>')]
+    lhs = '.'.join(sorted(lhs))
+    rhs = '.'.join(sorted(rhs))
+    rxn = f"{lhs}>>{rhs}"
+    return hashlib.sha1(rxn.encode('utf-8')).hexdigest()
+
 if __name__ == "__main__":
     smi = 'O=C(O)CC[c-]1[nH]cnc1=O'
+    rxn = 'O=C(O)CC[c-]1[nH]cnc1=O.O=C(O)CC[c-]1[nH]cnc1=O>>O=C(O)CC[c-]1[nH]cnc1=O.O=C(O)CC[c-]1[nH]cnc1=O'
 
     print(standardize_smiles(smi))
     print(standardize_smiles(smi, neutralization_method="simple"))
+    assert hash_compound(standardize_smiles(smi)) == hash_compound(standardize_smiles(smi))
+    assert hash_reaction(standardize_rxn(rxn)) == hash_reaction(standardize_rxn(rxn))
