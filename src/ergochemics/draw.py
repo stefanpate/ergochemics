@@ -18,7 +18,7 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
     rxn = rdChemReactions.ReactionFromSmarts(rxn, useSmiles=use_smiles)
     return Draw.ReactionToImage(rxn, useSVG=True, subImgSize=sub_img_size)
 
-def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_atoms: tuple = tuple(), draw_options: dict = {}) -> str:
+def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_atoms: tuple = tuple(), draw_options: dict = {}, legend: str = '') -> str:
     '''
     Draw molecule to svg string
 
@@ -376,7 +376,7 @@ def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_
         else:
             setattr(_draw_options, k, v)
 
-    drawer.DrawMolecule(mol, highlightAtoms=highlight_atoms)
+    drawer.DrawMolecule(mol, highlightAtoms=highlight_atoms, legend=legend)
     
     drawer.FinishDrawing()
     img = drawer.GetDrawingText()
