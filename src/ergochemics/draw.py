@@ -356,7 +356,7 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
             - property variableBondWidthMultiplier
                 what to multiply standard bond width by for variable attachment points.
     '''
-    _, _draw_options = _config_draw_options({}, sub_img_size)
+    _, _draw_options = _config_draw_options(draw_options, sub_img_size)
     rxn = rdChemReactions.ReactionFromSmarts(rxn, useSmiles=use_smiles)
     return Draw.ReactionToImage(rxn, useSVG=True, subImgSize=sub_img_size, drawOptions=_draw_options)
 
