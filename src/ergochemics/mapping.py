@@ -241,7 +241,12 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
     # Reaction.RunReactants() outputs do not have atoms ordered according to their
     # canonical SMILES ordering. Must go back and forth betweeen SMILES and mol, 
     # then label according to atom map numbers
-    rhs_am_smiles = [Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in output]
+    try:
+        rhs_am_smiles = [Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in output]
+    except Exception as e:
+        if e.__class__.__name__ == 'ArgumentError':
+            raise ValueError("RDKit ArgumentError encountered when generating SMILES from reaction output. Returning unmapped result.")
+        
     rhs_am_recap = [Chem.MolFromSmiles(smi) for smi in rhs_am_smiles]
     rhs_rc = []
     for mol in rhs_am_recap:
