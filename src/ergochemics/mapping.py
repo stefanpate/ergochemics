@@ -1,5 +1,6 @@
 from rdkit import Chem
 from rdkit.Chem import rdChemReactions
+from rdkit.Chem.rdchem import ChiralType
 import re
 from typing import Iterable
 from pydantic import BaseModel
@@ -327,7 +328,7 @@ def rc_to_nest(rc: str) -> tuple[tuple[tuple[int]]]:
         for side in rc.split(">>")
     )
 
-def get_reaction_center(am_rxn: str, mode: str = "separate") -> list[list[list[int]], list[list[int]]] | list[list[int], list[int]]:
+def get_reaction_center(am_rxn: str, mode: str = "separate", include_stereo: bool = False) -> list[list[list[int]], list[list[int]]] | list[list[int], list[int]]:
     '''
     Get reaction center from reaction SMARTS with atom mapping.
     
@@ -361,6 +362,7 @@ def get_reaction_center(am_rxn: str, mode: str = "separate") -> list[list[list[i
     amn_to_midx_aidx = [] # Atom map num to mol idx, atom idx for lhs, rhs
     adj_mats = []
     offsets = []
+    block_mols = []
     for side in sides:
         tmp = {}
         n_atoms = []
@@ -376,6 +378,7 @@ def get_reaction_center(am_rxn: str, mode: str = "separate") -> list[list[list[i
 
         block_smi = ".".join(side)
         block_mol = Chem.MolFromSmiles(block_smi)
+        block_mols.append(block_mol)
         block_aidx_to_amn = {atom.GetIdx(): atom.GetAtomMapNum() for atom in block_mol.GetAtoms()}
         A = Chem.GetAdjacencyMatrix(mol=block_mol, useBO=True)
         srt_idx = sorted([i for i in range(A.shape[0])], key=lambda x : block_aidx_to_amn[x])
@@ -387,7 +390,11 @@ def get_reaction_center(am_rxn: str, mode: str = "separate") -> list[list[list[i
     if len(amn_to_midx_aidx[0].keys() ^ amn_to_midx_aidx[1].keys()) != 0:
         raise ValueError("LHS and RHS atom maps do not perfectly intersect")
 
-    rc_amns = np.flatnonzero(D.sum(axis=1)) + 1
+    rc_amns = list(np.flatnonzero(D.sum(axis=1)) + 1)
+
+    if include_stereo:
+        rc_amns = _add_stereo_double_bond_atoms(block_mols, rc_amns)
+        rc_amns = _add_chiral_center_atoms(block_mols, rc_amns)
     
     if mode == "separate":
         reaction_center = [[[] for _ in range(len(side))] for side in sides]
@@ -404,10 +411,80 @@ def get_reaction_center(am_rxn: str, mode: str = "separate") -> list[list[list[i
 
     return reaction_center
 
+def _add_stereo_double_bond_atoms(block_mols: list[Chem.Mol], rc_amns: list[int]) -> list[int]:
+    '''
+    Adds atom map numbers of atoms involved in stereo double bonds
+    to the reaction center atom map numbers.
+
+    Args
+    ----
+    block_mols:list[Chem.Mol]
+        List of RDKit Mol objects for the left- and right-hand sides
+        of the reaction.
+    rc_amns:list[int]
+        List of reaction center atom map numbers.
+
+    Returns
+    -------
+    list[int]
+        Updated list of reaction center atom map numbers.
+    '''
+    lhs_mol, rhs_mol = block_mols
+    rhs_amn_to_aidx = {atom.GetAtomMapNum(): atom.GetIdx() for atom in rhs_mol.GetAtoms()}
+    rc_amns = set(rc_amns)
+    for lhs_bond in lhs_mol.GetBonds():
+        if lhs_bond.GetBondType() == Chem.rdchem.BondType.DOUBLE and lhs_bond.GetStereo() != Chem.rdchem.BondStereo.STEREONONE:
+            begin_amn = lhs_bond.GetBeginAtom().GetAtomMapNum()
+            end_amn = lhs_bond.GetEndAtom().GetAtomMapNum()
+            rhs_begin_aidx = rhs_amn_to_aidx[begin_amn]
+            rhs_end_aidx = rhs_amn_to_aidx[end_amn]
+            rhs_bond = rhs_mol.GetBondBetweenAtoms(rhs_begin_aidx, rhs_end_aidx)
+            
+            if rhs_bond is not None and rhs_bond.GetStereo() != Chem.rdchem.BondStereo.STEREONONE:
+                rc_amns.add(begin_amn)
+                rc_amns.add(end_amn)
+    
+    return list(rc_amns)
+
+def _add_chiral_center_atoms(block_mols: list[Chem.Mol], rc_amns: list[int]) -> list[int]:
+    lhs_mol, rhs_mol = block_mols
+    rhs_amn_to_aidx = {atom.GetAtomMapNum(): atom.GetIdx() for atom in rhs_mol.GetAtoms()}
+    rc_amns = set(rc_amns)
+    lhs_ctrs = [
+        (elt[0], lhs_mol.GetAtomWithIdx(elt[0]).GetAtomMapNum()) for elt in Chem.FindMolChiralCenters(lhs_mol) # (atom idx, atom map num)
+    ]
+    for (ctr_aidx, ctr_amn) in lhs_ctrs:
+        rhs_aidx = rhs_amn_to_aidx[ctr_amn]
+        rhs_atom = rhs_mol.GetAtomWithIdx(rhs_aidx)
+        
+        if rhs_atom.GetChiralTag() == ChiralType.CHI_UNSPECIFIED:
+            continue
+        
+        lhs_tetra = _fragment_chiral_tetrahedral_wo_ams(lhs_mol, ctr_aidx)
+        rhs_tetra = _fragment_chiral_tetrahedral_wo_ams(rhs_mol, rhs_aidx)
+        
+        if lhs_tetra != rhs_tetra:
+            rc_amns.add(ctr_amn)
+            for nbr in lhs_mol.GetAtomWithIdx(ctr_aidx).GetNeighbors():
+                rc_amns.add(nbr.GetAtomMapNum())
+    
+    return list(rc_amns)
+
+def _fragment_chiral_tetrahedral_wo_ams(mol: Chem.Mol, ctr_ids: int) -> str:
+    neighbor_ids = [nbr.GetIdx() for nbr in mol.GetAtomWithIdx(ctr_ids).GetNeighbors()]
+    am_sma = Chem.MolFragmentToSmarts(mol, atomsToUse=[ctr_ids] + neighbor_ids)
+    sma = Chem.MolToSmarts(Chem.MolFromSmarts(am_sma))
+    return sma
+
 if __name__ == '__main__':
     import json
     import pandas as pd
     from time import perf_counter
+
+    tetrahedral_chiral_inversion = '[C:1][C:2][C@H:3]([C:4])[Br:5]>>[C:1][C:2][C@@H:3]([C:4])[Br:5]'
+    stereo_double_bond_inversion = '[C:1]/[C:2]=[C:3]/[C:4]=[O:5]>>[C:1]/[C:2]=[C:3]\[C:4]=[O:5]'
+    print(get_reaction_center(stereo_double_bond_inversion, include_stereo=True))
+    print(get_reaction_center(tetrahedral_chiral_inversion, include_stereo=True))
 
     with open('v3_folded_pt_ns.json', 'r') as f:
         data = json.load(f)
