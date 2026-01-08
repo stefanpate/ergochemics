@@ -482,7 +482,7 @@ if __name__ == '__main__':
     from time import perf_counter
 
     tetrahedral_chiral_inversion = '[C:1][C:2][C@H:3]([C:4])[Br:5]>>[C:1][C:2][C@@H:3]([C:4])[Br:5]'
-    stereo_double_bond_inversion = '[C:1]/[C:2]=[C:3]/[C:4]=[O:5]>>[C:1]/[C:2]=[C:3]\[C:4]=[O:5]'
+    stereo_double_bond_inversion = '[C:1]/[C:2]=[C:3]/[C:4]=[O:5]>>[C:1]/[C:2]=[C:3]\\[C:4]=[O:5]'
     print(get_reaction_center(stereo_double_bond_inversion, include_stereo=True))
     print(get_reaction_center(tetrahedral_chiral_inversion, include_stereo=True))
 
