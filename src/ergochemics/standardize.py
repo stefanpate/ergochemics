@@ -5,7 +5,7 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from copy import deepcopy
 import hashlib
 
-def _handle_kwargs(**kwargs):
+def _handle_kwargs(**kwargs) -> dict:
     default_kwargs = {
         'do_canon_taut':False,
         'do_neutralize':True,
@@ -46,6 +46,7 @@ def standardize_mol(mol: Chem.Mol, **kwargs) -> Chem.Mol:
             Maximum number of tautomers to generate
         - quiet:bool = False
             Whether to suppress warnings
+    
     Returns
     -------
     mol:rdkit.Chem.rdchem.Mol
@@ -102,6 +103,7 @@ def standardize_smiles(smiles:str, **kwargs) -> str:
             Maximum number of tautomers to generate
         - quiet:bool
             Whether to suppress warnings
+    
     Returns
     -------
     smiles:str
@@ -116,7 +118,7 @@ def standardize_smiles(smiles:str, **kwargs) -> str:
     
     return Chem.MolToSmiles(mol)
 
-def standardize_rxn(rxn: str, **kwargs) -> str:
+def standardize_reaction(rxn: str, remove_protons: bool = False, **kwargs) -> str:
     kwargs = _handle_kwargs(**kwargs)
     '''
     Standardize a reaction using RDKit's standardization tools.
@@ -125,6 +127,8 @@ def standardize_rxn(rxn: str, **kwargs) -> str:
     ----
     rxn:str
         SMARTS-encoded reaction, 'reactant.reactant>>product.product'
+    remove_protons:bool = False
+        Whether to remove protons ([H+]) from the reaction.
     kwargs:dict
         Keyword arguments to pass to the standardization functions.
         - do_canon_taut:bool
@@ -139,12 +143,18 @@ def standardize_rxn(rxn: str, **kwargs) -> str:
             Maximum number of tautomers to generate
         - quiet:bool
             Whether to suppress warnings
+    
     Returns
     -------
     rxn:str
         Standardized reaction.
     '''
     rcts, pdts = [side.split('.') for side in rxn.split('>>')]
+
+    if remove_protons:
+        rcts = [elt for elt in rcts if elt != '[H+]']
+        pdts = [elt for elt in pdts if elt != '[H+]']
+
     rcts = [standardize_smiles(r, **kwargs) for r in rcts]
     pdts = [standardize_smiles(p, **kwargs) for p in pdts]
     
@@ -284,12 +294,3 @@ def hash_reaction(rxn: str) -> str:
     rhs = '.'.join(sorted(rhs))
     rxn = f"{lhs}>>{rhs}"
     return hashlib.sha1(rxn.encode('utf-8')).hexdigest()
-
-if __name__ == "__main__":
-    smi = 'O=C(O)CC[c-]1[nH]cnc1=O'
-    rxn = 'O=C(O)CC[c-]1[nH]cnc1=O.O=C(O)CC[c-]1[nH]cnc1=O>>O=C(O)CC[c-]1[nH]cnc1=O.O=C(O)CC[c-]1[nH]cnc1=O'
-
-    print(standardize_smiles(smi))
-    print(standardize_smiles(smi, neutralization_method="simple"))
-    assert hash_compound(standardize_smiles(smi)) == hash_compound(standardize_smiles(smi))
-    assert hash_reaction(standardize_rxn(rxn)) == hash_reaction(standardize_rxn(rxn))

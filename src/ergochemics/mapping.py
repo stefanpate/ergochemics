@@ -8,13 +8,14 @@ from itertools import permutations, product, chain, accumulate
 from functools import lru_cache
 import numpy as np
 from ergochemics.standardize import (
-    standardize_rxn,
+    standardize_reaction,
     fast_tautomerize
 )
 
 class OperatorMapResult(BaseModel):
     '''
     Result of mapping a reaction to a reaction operator.
+    
     Attributes
     ----------
     did_map:bool
@@ -46,7 +47,7 @@ MAPPING_STANDARDIZATION_DEFAULTS = {
 
 @lru_cache(maxsize=1000)
 def _m_standardize_reaction(rxn: str, **kwargs) -> str:
-    return standardize_rxn(rxn, **kwargs)
+    return standardize_reaction(rxn, **kwargs)
 
 @lru_cache(maxsize=1000)
 def _cached_fast_tautomerize(smiles: str) -> str:
@@ -93,8 +94,20 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
 
     Returns
     -------
-    OperatorMapResult
-        Result of mapping. See class for details
+    :OperatorMapResult
+        Result of mapping w/ attributes:
+        - did_map:bool
+            || Whether the mapping was successful
+        - aligned_smarts:str | None
+            || Reaction SMARTS with reactants and products
+            aligned to the operator reactants and products
+        - atom_mapped_smarts:str | None
+            || Reaction SMARTS with atom map numbers
+        - reaction_center:tuple[tuple[int]] | None
+            || Reaction center indices. Outer
+            iterable is len 2,
+            next iterable is len n rcts or n prods,
+            next is len(n rc atoms in molecule i)
     '''
     try:
         rxn = _m_standardize_reaction(rxn, **MAPPING_STANDARDIZATION_DEFAULTS)
@@ -211,6 +224,7 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
     am_to_reactant_idx:dict[int, int]
         Mapping of atom map numbers to reactant indices
         (i.e. which reactant the atom map number belongs to)
+    
     Returns
     -------
     :tuple[str, str, tuple[tuple[int, ...], tuple[int, ...]]]
@@ -269,6 +283,7 @@ def extract_operator_patts(smarts: str) -> tuple[tuple[str]]:
     ----
     smarts:str
         Reaction SMARTS
+    
     Returns
     -------
     tuple[tuple[str]]
@@ -349,10 +364,10 @@ def get_reaction_center(am_rxn: str, mode: str = "separate", include_stereo: boo
     
     Returns
     -------
-    list[list[list[int]], list[list[int]]] | list[list[int], list[int]]
-        If mode is "separate", returns a list of lists of lists of reaction center indices
+    tuple[tuple[tuple[int]], tuple[tuple[int]]] | tuple[tuple[int], tuple[int]]
+        If mode is "separate", returns a tuple of tuples of tuples of reaction center indices
         for each molecule for each side of the reaction.
-        If mode is "combined", returns a list of lists of reaction center indices for each side of the reaction,
+        If mode is "combined", returns a tuple of tuples of reaction center indices for each side of the reaction,
         treating each side as a combined, disjoint molecule.
 
     Notes
@@ -376,7 +391,12 @@ def get_reaction_center(am_rxn: str, mode: str = "separate", include_stereo: boo
             n_atoms.append(mol.GetNumAtoms())
             
             for atom in mol.GetAtoms():
-                tmp[atom.GetAtomMapNum()] = (midx, atom.GetIdx())
+                amn = atom.GetAtomMapNum()
+
+                if amn == 0:
+                    raise ValueError("All atoms in reaction SMARTS must have atom map numbers")
+
+                tmp[amn] = (midx, atom.GetIdx())
         
         amn_to_midx_aidx.append(tmp)
         offsets.append([0] + list(accumulate(n_atoms)))
@@ -402,17 +422,21 @@ def get_reaction_center(am_rxn: str, mode: str = "separate", include_stereo: boo
         rc_amns = _add_chiral_center_atoms(block_mols, rc_amns)
     
     if mode == "separate":
-        reaction_center = [[[] for _ in range(len(side))] for side in sides]
+        tmp = [[[] for _ in range(len(side))] for side in sides]
         for amn in rc_amns:
             for side_idx, lookup in enumerate(amn_to_midx_aidx):
                 midx, aidx = lookup[amn]
-                reaction_center[side_idx][midx].append(aidx)
+                tmp[side_idx][midx].append(aidx)
+
+        reaction_center = tuple([tuple(tuple(sorted(mol_rc)) for mol_rc in side_rc) for side_rc in tmp])
     elif mode == "combined":
-        reaction_center = [[], []]
+        tmp = [[], []]
         for amn in rc_amns:
             for side_idx, lookup in enumerate(amn_to_midx_aidx):
                 midx, aidx = lookup[amn]
-                reaction_center[side_idx].append(aidx + offsets[side_idx][midx])
+                tmp[side_idx].append(aidx + offsets[side_idx][midx])
+
+        reaction_center = tuple([tuple(sorted(side_rc)) for side_rc in tmp])
 
     return reaction_center
 
@@ -439,6 +463,8 @@ def _add_stereo_double_bond_atoms(block_mols: list[Chem.Mol], rc_amns: list[int]
     rc_amns = set(rc_amns)
     for lhs_bond in lhs_mol.GetBonds():
         if lhs_bond.GetBondType() == Chem.rdchem.BondType.DOUBLE and lhs_bond.GetStereo() != Chem.rdchem.BondStereo.STEREONONE:
+            begin_aidx = lhs_bond.GetBeginAtom().GetIdx()
+            end_aidx = lhs_bond.GetEndAtom().GetIdx()
             begin_amn = lhs_bond.GetBeginAtom().GetAtomMapNum()
             end_amn = lhs_bond.GetEndAtom().GetAtomMapNum()
             rhs_begin_aidx = rhs_amn_to_aidx[begin_amn]
@@ -448,6 +474,11 @@ def _add_stereo_double_bond_atoms(block_mols: list[Chem.Mol], rc_amns: list[int]
             if rhs_bond is not None and rhs_bond.GetStereo() != Chem.rdchem.BondStereo.STEREONONE:
                 rc_amns.add(begin_amn)
                 rc_amns.add(end_amn)
+
+                for nbr in lhs_mol.GetAtomWithIdx(begin_aidx).GetNeighbors():
+                    rc_amns.add(nbr.GetAtomMapNum())
+                for nbr in lhs_mol.GetAtomWithIdx(end_aidx).GetNeighbors():
+                    rc_amns.add(nbr.GetAtomMapNum())
     
     return list(rc_amns)
 
@@ -481,33 +512,4 @@ def _fragment_chiral_tetrahedral_wo_ams(mol: Chem.Mol, ctr_ids: int) -> str:
     sma = Chem.MolToSmarts(Chem.MolFromSmarts(am_sma))
     return sma
 
-if __name__ == '__main__':
-    import json
-    import pandas as pd
-    from time import perf_counter
-
-    tetrahedral_chiral_inversion = '[C:1][C:2][C@H:3]([C:4])[Br:5]>>[C:1][C:2][C@@H:3]([C:4])[Br:5]'
-    stereo_double_bond_inversion = '[C:1]/[C:2]=[C:3]/[C:4]=[O:5]>>[C:1]/[C:2]=[C:3]\\[C:4]=[O:5]'
-    print(get_reaction_center(stereo_double_bond_inversion, include_stereo=True))
-    print(get_reaction_center(tetrahedral_chiral_inversion, include_stereo=True))
-
-    with open('v3_folded_pt_ns.json', 'r') as f:
-        data = json.load(f)
-
-    ops = pd.read_csv('minimal1224_all_uniprot.tsv', sep='\t')
-
-    ex_k, ex_rxn = list(data.items())[0]
-    op = ops.loc[ops['Name'] == ex_rxn['min_rules'][0], 'SMARTS'].values[0]
-    for _ in range(2):
-        tic = perf_counter()
-        res = operator_map_reaction(ex_rxn['smarts'], op)
-        toc = perf_counter()
-        print(f"Elapsed time: {toc - tic:.4f} seconds")
-
-    for k, v in data.items():
-        op_name = v['min_rules'][0]
-        op = ops.loc[ops['Name'] == op_name, 'SMARTS'].values[0]
-        rxn = v['smarts']
-        res = operator_map_reaction(rxn=rxn, operator=op)
-
-    print('hold')
+operator_map_reaction

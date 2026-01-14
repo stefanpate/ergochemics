@@ -20,6 +20,7 @@ build-backend = "setuptools.build_meta"
 [dependency-groups]
 dev = [
     "ergochemics",
+    "pytest>=9.0.2",
 ]
 
 [tool.uv.sources]

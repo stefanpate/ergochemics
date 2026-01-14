@@ -6,8 +6,8 @@ from copy import deepcopy
 import re
 from itertools import chain
 from functools import partial
+from ergochemics.mapping import get_reaction_center
 
-# TODO: test
 def rcmcs_score(
         rxn1: str,
         rxn2: str,
@@ -342,7 +342,18 @@ def amphoteros_ox_state(atom: Chem.Atom) -> float:
         )
 
 class MolFeaturizer:
+    '''
+    Featurizes molecules using a custom atom featurization scheme
+    and optionally reaction center information in the case that molecules
+    are reactants in a reaction.
+    '''
     def __init__(self, atom_featurizer: Callable[[Chem.Atom], list[int | float]] = rule_default):
+        '''
+        Args
+        ----
+        atom_featurizer:Callable[[Chem.Atom], list[int | float]]
+            Function that featurizes an atom into a list of features
+        '''
         self.atom_featurizer = atom_featurizer
 
     def featurize(self, mol: Chem.Mol, rc: Iterable[int] = []) -> np.ndarray:
@@ -386,13 +397,24 @@ class MolFeaturizer:
         return fts
     
 class MorganFingerprinter:
-    def __init__(self,
-            radius: int,
-            length: int,
-            mol_featurizer: MolFeaturizer,
-            allocate_ao: bool = False,
-            **kwargs
-        ):
+    '''
+    Generates Morgan fingerprints using custom atom featurization scheme
+    and optionally reaction center information in the case that molecules
+    are reactants in a reaction.
+    '''
+    def __init__(self, radius: int, length: int, mol_featurizer: MolFeaturizer, allocate_ao: bool = False, **kwargs):
+        '''
+        Args
+        ----
+        radius:int
+            Radius of Morgan fingerprint (max # hops to get fragments)
+        length:int
+            Length of Morgan fingerprint (# elements in fingerprint vector)
+        mol_featurizer:MolFeaturizer
+            Molecule featurizer to generate atom features
+        allocate_ao:bool = False
+            Whether to allocate additional output (bit info map, atom counts, atom to bits)
+        '''
         self._generator = rdFingerprintGenerator.GetMorganGenerator(radius=radius, fpSize=length, **kwargs)
         
         if allocate_ao:
@@ -410,7 +432,27 @@ class MorganFingerprinter:
         self.mol_featurizer = mol_featurizer
 
     def fingerprint(self, mol: Chem.Mol, reaction_center: Iterable[int] = [], output_type: str = 'bit', rc_dist_ub: int = None) -> np.ndarray:
-        
+        '''
+        Fingerprints molecule.
+
+        Args
+        ----
+        mol:Chem.Mol
+            RDKit molecule object
+        reaction_center:Iterable[int] = []
+            List of atom indices corresponding to reaction center
+        output_type:str = 'bit'
+            Type of fingerprint to return. 'bit' for binary fingerprint,
+            'count' for count-based fingerprint.
+        rc_dist_ub:int = None
+            Upper bound on distance from reaction center for atoms to include
+            in fingerprint. If None, all atoms are included.
+
+        Returns
+        -------
+        fp:np.ndarray
+            Morgan fingerprint of molecule
+        '''
         if rc_dist_ub is not None and len(reaction_center) == 0:
             raise ValueError("If providing upper bound on distance from reaction center, must also provide reaction center")
 
@@ -428,12 +470,18 @@ class MorganFingerprinter:
             return self._fingerprint[output_type](mol, customAtomInvariants=feats)
 
     def hash_features(self, atom_feats: tuple):
-        # bitwise AND w/ 0xFFFFFFFF to get 32-bit hash expected by rdkit
-
-        return hash(atom_feats) & 0xFFFFFFFF
+        return hash(atom_feats) & 0xFFFFFFFF # bitwise AND w/ 0xFFFFFFFF to get 32-bit hash expected by rdkit
     
     @property
     def bit_info_map(self) -> dict:
+        '''
+        Returns bit info map if allocated, else empty dict.
+
+        Returns
+        -------
+        bit_info_map:dict
+            Maps fingerprint bits to atom indices and fragment radius.
+        '''
         if self._additional_ouput:
             return self._additional_ouput.GetBitInfoMap()
         else:
@@ -441,6 +489,14 @@ class MorganFingerprinter:
     
     @property
     def atom_counts(self) -> tuple:
+        '''
+        Returns the number of bits each atom contributes to the fingerprint.
+
+        Returns
+        -------
+        atom_counts:tuple
+            Number of bits each atom contributes to the fingerprint.
+        '''
         if self._additional_ouput:
             return self._additional_ouput.GetAtomCounts()
         else:
@@ -448,21 +504,65 @@ class MorganFingerprinter:
         
     @property
     def atom_to_bits(self) -> tuple:
+        '''
+        Returns which bits each atom contributes to the fingerprint.
+
+        Returns
+        -------
+        atom_to_bits:tuple
+            Which bits each atom contributes to the fingerprint.
+        '''
         if self._additional_ouput:
             return self._additional_ouput.GetAtomToBits()
         else:
             return tuple()
-        
-if __name__ == '__main__':
-    sma1 = "NC(=O)C1=CN(C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(OP(=O)(O)O)C3O)C(O)C2O)C=CC1.O=C(O)CCC(=O)C(=O)O"
-    sma2 = "NC(=O)C1=CN(C2OC(COP(=O)(O)OP(=O)(O)OCC3OC(n4cnc5c(N)ncnc54)C(OP(=O)(O)O)C3O)C(O)C2O)C=CC1.O=C(O)CCC(=O)C(=O)O"
-    rc1 = [3, 47, 46, 45, 5, 4, 50, 49]
-    rc2 = [3, 4, 5, 45, 46, 47, 49, 50]
-    mfper = MorganFingerprinter(
-        radius=2,
-        length=2048,
-        mol_featurizer=MolFeaturizer(),
-    )
-    fp1 = mfper.fingerprint(Chem.MolFromSmiles(sma1), rc1, rc_dist_ub=1)
-    fp2 = mfper.fingerprint(Chem.MolFromSmiles(sma2), rc2, rc_dist_ub=1)
-    print(np.allclose(fp1, fp2))  # Should be True if fingerprints are equal
+
+class ReactionFeaturizer(MorganFingerprinter):
+    '''
+    Convenience class to fingerprint reactions.
+    '''
+    def __init__(self, radius: int, length: int, mol_featurizer: MolFeaturizer, allocate_ao: bool = False, **kwargs):
+        '''
+        Args
+        ----
+        radius:int
+            Radius of Morgan fingerprint (max # hops to get fragments)
+        length:int
+            Length of Morgan fingerprint (# elements in fingerprint vector)
+        mol_featurizer:MolFeaturizer
+            Molecule featurizer to generate atom features
+        allocate_ao:bool = False
+            Whether to allocate additional output (bit info map, atom counts, atom to bits)
+        '''
+        super().__init__(radius, length, mol_featurizer, allocate_ao, **kwargs)
+
+    def fingerprint(self, rxn: str, use_rc: bool = False, output_type: str = 'bit', rc_dist_ub: int = None) -> np.ndarray:
+        '''
+        Fingerprints reaction
+
+        Args
+        ----
+        rxn:str
+            Reaction in form 'A.B>>>C.D'. Must be all-atom mapped
+            if using reaction center information.
+        output_type:str = 'bit'
+            Type of fingerprint to return. 'bit' for binary fingerprint,
+            'count' for count-based fingerprint.
+        rc_dist_ub:int = None
+            Upper bound on distance from reaction center for atoms to include
+            in fingerprint. If None, all atoms are included.
+
+        Returns
+        -------
+        fp:np.ndarray
+            Morgan fingerprint of reaction (as concatenation of left- and right-hand side fingerprints)
+        '''
+        if use_rc:
+            lrc, rrc = get_reaction_center(rxn, mode='combined')
+        else:
+            lrc, rrc = [], []
+
+        lhs, rhs = [Chem.MolFromSmiles(side) for side in rxn.split(">>")]
+        lhs_fp = super().fingerprint(lhs, reaction_center=lrc, output_type=output_type, rc_dist_ub=rc_dist_ub)
+        rhs_fp = super().fingerprint(rhs, reaction_center=rrc, output_type=output_type, rc_dist_ub=rc_dist_ub)
+        return np.concatenate([lhs_fp, rhs_fp])

@@ -87,6 +87,7 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
                 Moves the centre of the drawn molecule to (0,0).Default False.
 
             - property circleAtoms
+                
             - property clearBackground
                 clear the background before drawing a molecule
 
@@ -94,6 +95,7 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
                 simulate hand-drawn lines for bonds. When combined with a font like Comic-Sans or Comic-Neue, this gives xkcd-like drawings. Default is false.
 
             - property continuousHighlight
+                
             - property drawMolsSameScale
                 when drawing multiple molecules with DrawMolecules, forces them to use the same scale. Default is true.
 
@@ -101,6 +103,7 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
                 Drawing extents are computed taking into account only selected DrawElement items. Default=DrawElement.ALL
 
             - property dummiesAreAttachments
+
             - property dummyIsotopeLabels
                 adds isotope labels on dummy atoms. Default True.
 
@@ -108,6 +111,7 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
                 Draw terminal methyls explictly. Default is false.
 
             - property fillHighlights
+
             - property fixedBondLength
                 If > 0.0, fixes bond length to this number of pixelsunless that would make it too big. Default -1.0 meansno fix. If both set, fixedScale takes precedence.
 
@@ -118,6 +122,7 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
                 If > 0.0, fixes scale to that fraction of width ofdraw window. Default -1.0 means adjust scale to fit.
 
             - property flagCloseContactsDist
+
             - property fontFile
                 Font file for use with FreeType text drawer. Can also be BuiltinTelexRegular (the default) or BuiltinRobotoRegular.
 
@@ -355,6 +360,11 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
 
             - property variableBondWidthMultiplier
                 what to multiply standard bond width by for variable attachment points.
+    
+    Returns
+    -------
+    :str
+        SVG string of drawn reaction
     '''
     _, _draw_options = _config_draw_options(draw_options, sub_img_size)
     rxn = rdChemReactions.ReactionFromSmarts(rxn, useSmiles=use_smiles)
@@ -428,6 +438,7 @@ def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_
                 Moves the centre of the drawn molecule to (0,0).Default False.
 
             - property circleAtoms
+
             - property clearBackground
                 clear the background before drawing a molecule
 
@@ -435,6 +446,7 @@ def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_
                 simulate hand-drawn lines for bonds. When combined with a font like Comic-Sans or Comic-Neue, this gives xkcd-like drawings. Default is false.
 
             - property continuousHighlight
+
             - property drawMolsSameScale
                 when drawing multiple molecules with DrawMolecules, forces them to use the same scale. Default is true.
 
@@ -442,6 +454,7 @@ def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_
                 Drawing extents are computed taking into account only selected DrawElement items. Default=DrawElement.ALL
 
             - property dummiesAreAttachments
+
             - property dummyIsotopeLabels
                 adds isotope labels on dummy atoms. Default True.
 
@@ -449,6 +462,7 @@ def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_
                 Draw terminal methyls explictly. Default is false.
 
             - property fillHighlights
+
             - property fixedBondLength
                 If > 0.0, fixes bond length to this number of pixelsunless that would make it too big. Default -1.0 meansno fix. If both set, fixedScale takes precedence.
 
@@ -459,6 +473,7 @@ def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_
                 If > 0.0, fixes scale to that fraction of width ofdraw window. Default -1.0 means adjust scale to fit.
 
             - property flagCloseContactsDist
+
             - property fontFile
                 Font file for use with FreeType text drawer. Can also be BuiltinTelexRegular (the default) or BuiltinRobotoRegular.
 
@@ -696,6 +711,11 @@ def draw_molecule(molecule: str | Chem.Mol, size: tuple = (200, 200), highlight_
 
             - property variableBondWidthMultiplier
                 what to multiply standard bond width by for variable attachment points.
+    
+    Returns
+    -------
+    :str
+        SVG string of drawn molecule
     '''
     if type(molecule) is str:
         mol = Chem.MolFromSmiles(molecule)
