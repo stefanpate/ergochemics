@@ -8,12 +8,9 @@ from itertools import chain
 from functools import partial
 from ergochemics.mapping import get_reaction_center
 
-def rcmcs_score(
+def rcmcs_similarity(
         rxn1: str,
         rxn2: str,
-        rcs1: Iterable[Iterable[int]],
-        rcs2: Iterable[Iterable[int]],
-        patts: Iterable[str],
         norm: str ='max',
         average: str = 'weighted',
         enforce_ring_membership: bool = False
@@ -27,16 +24,9 @@ def rcmcs_score(
     Args
     ----
     rxn1:str | Iterable[str]
-        Reaction 1 in form 'A.B>>>C.D' or iterable of reactant / product SMILES
+        Atom-mapped reaction 1 in form 'A.B>>>C.D'
     rxn2:str | Iterable[str]
-        Reaction 2 in form 'A.B>>>C.D' or iterable of reactant / product SMILES
-    rcs1:Iterable[Iterable[int]]
-        Reaction center atom indices for reaction 1
-    rcs2:Iterable[Iterable[int]]
-        Reaction center atom indices for reaction 2
-    patts:Iterable[str]
-        SMARTS patterns of reaction center fragments in order they appear in
-        rxn1 and rxn2 / rcs1 and rcs2
+        Atom-mapped reaction 2 in form 'A.B>>>C.D'
     norm:str
         Normalization method for rcmcs score. If 'max', score is divided by
         # of atoms in the larger reactant. If 'min', score is divided by
@@ -57,29 +47,42 @@ def rcmcs_score(
     if average not in ['weighted', 'simple']:
         raise ValueError("Average must be 'weighted' or 'simple'")
     
-    if ">>" in rxn1:
-        rxn1 = list(chain(*[side.split('.') for side in rxn1.split(">>")]))
+    lrc_idx1, rrc_idx1 = get_reaction_center(rxn1, mode='combined')
+    lrc_idx2, rrc_idx2 = get_reaction_center(rxn2, mode='combined')
+    lhs1, rhs1 = [Chem.MolFromSmiles(side) for side in rxn1.split(">>")]
+    lhs2, rhs2 = [Chem.MolFromSmiles(side) for side in rxn2.split(">>")]
 
-    if ">>" in rxn2:
-        rxn2 = list(chain(*[side.split('.') for side in rxn2.split(">>")]))
+    for mol in [lhs1, rhs1, lhs2, rhs2]:
+        for atom in mol.GetAtoms():
+            atom.SetAtomMapNum(0)  # Clear atom map numbers to allow string compares of canonical SMILES
 
-    len_set = set()
-    len_set.add(len(rcs1))
-    len_set.add(len(rcs2))
-    len_set.add(len(patts))
-    len_set.add(len(rxn1))
-    len_set.add(len(rxn2))
+    lrc1, rrc1 = [Chem.MolFragmentToSmiles(mol, atomsToUse=rc_idx) for mol, rc_idx in zip([lhs1, rhs1], [lrc_idx1, rrc_idx1])]
+    lrc2, rrc2 = [Chem.MolFragmentToSmiles(mol, atomsToUse=rc_idx) for mol, rc_idx in zip([lhs2, rhs2], [lrc_idx2, rrc_idx2])]
 
-    if len(len_set) != 1:
-        raise ValueError("Number of reactants / products, reaction centers, and reaction center patterns do not match")
+    if (lrc1 != lrc2 and rrc1 != rrc2) and (lrc1 != rrc2 and rrc1 != lrc2):
+        return 0.0  # No common reaction center structure
+    
+    if lrc1 == rrc2:
+        tmp = lhs2
+        lhs2 = rhs2
+        rhs2 = tmp
+        tmp_idx = lrc_idx2
+        lrc_idx2 = rrc_idx2
+        rrc_idx2 = tmp_idx
+        tmp_smiles = lrc2
+        lrc2 = rrc2
+        rrc2 = tmp_smiles
+
+    lrc_idx1 = _canonically_order_atom_idxs(lhs1, tuple(lrc_idx1), lrc1)
+    rrc_idx1 = _canonically_order_atom_idxs(rhs1, tuple(rrc_idx1), rrc1)
+    lrc_idx2 = _canonically_order_atom_idxs(lhs2, tuple(lrc_idx2), lrc2)
+    rrc_idx2 = _canonically_order_atom_idxs(rhs2, tuple(rrc_idx2), rrc2)
     
     n_atoms = 0
     rcmcs = 0
     n_mols = 0
-    for smi1, smi2, rc1, rc2, patt in zip(rxn1, rxn2, rcs1, rcs2, patts):
-        mol1 = Chem.MolFromSmiles(smi1)
-        mol2 = Chem.MolFromSmiles(smi2)
-        rcmcs_i = molecule_rcmcs_score([mol1, mol2], [rc1, rc2], patt, norm=norm, enforce_ring_membership=enforce_ring_membership)
+    for mol1, mol2, rc_idx1, rc_idx2, patt in zip([lhs1, rhs1], [lhs2, rhs2], [lrc_idx1, rrc_idx1], [lrc_idx2, rrc_idx2], [lrc1, rrc1]):
+        rcmcs_i = molecule_rcmcs_score([mol1, mol2], [rc_idx1, rc_idx2], patt, norm=norm, enforce_ring_membership=enforce_ring_membership)
 
         n1 = mol1.GetNumAtoms()
         n2 = mol2.GetNumAtoms()
@@ -102,7 +105,7 @@ def rcmcs_score(
     elif average == 'simple':
         return rcmcs / n_mols
 
-def molecule_rcmcs_score(mols: list[Chem.Mol], rcs: list[tuple[int]], patt:str, norm='max', enforce_ring_membership: bool = False):
+def molecule_rcmcs_score(mols: list[Chem.Mol], rcs: list[tuple[int]], patt:str, norm='max', enforce_ring_membership: bool = False) -> float:
     '''
     Args
     ----
@@ -125,14 +128,14 @@ def molecule_rcmcs_score(mols: list[Chem.Mol], rcs: list[tuple[int]], patt:str, 
 
     if res is None:
         return 0.0
-    elif res.canceled:
-        return 0
+    elif res['canceled']:
+        return 0.0
     elif norm == 'min':
-        return res.numAtoms / min(m.GetNumAtoms() for m in mols)
+        return res['num_atoms'] / min(m.GetNumAtoms() for m in mols)
     elif norm == 'max':
-        return res.numAtoms / max(m.GetNumAtoms() for m in mols)
+        return res['num_atoms'] / max(m.GetNumAtoms() for m in mols)
 
-def molecule_rcmcs(mols: list[Chem.Mol], rcs: list[tuple[int]], patt:str, enforce_ring_membership: bool = False):
+def molecule_rcmcs(mols: list[Chem.Mol], rcs: list[tuple[int]], patt:str, enforce_ring_membership: bool = False) -> dict | None:
     '''
     Args
     ----
@@ -205,7 +208,8 @@ def molecule_rcmcs(mols: list[Chem.Mol], rcs: list[tuple[int]], patt:str, enforc
         'smarts_string': smarts_string,
         'rcmcs_idxs': rcmcs_idxs,
         'num_atoms': tmp.numAtoms,
-        'num_bonds': tmp.numBonds
+        'num_bonds': tmp.numBonds,
+        'canceled': tmp.canceled
     }
 
     return res
@@ -259,7 +263,6 @@ def _check_ring_membership(mols: list[Chem.Mol], rcs: list[tuple[int]]):
             return False
         
     return True
-
 
 '''
 Atom featurizers
@@ -566,3 +569,20 @@ class ReactionFeaturizer(MorganFingerprinter):
         lhs_fp = super().fingerprint(lhs, reaction_center=lrc, output_type=output_type, rc_dist_ub=rc_dist_ub)
         rhs_fp = super().fingerprint(rhs, reaction_center=rrc, output_type=output_type, rc_dist_ub=rc_dist_ub)
         return np.concatenate([lhs_fp, rhs_fp])
+    
+def _canonically_order_atom_idxs(mol: Chem.Mol, aidxs: tuple[int], canonical_smiles_pattern: str) -> tuple[int]:
+    '''
+    Returns atom indices ordered according to
+    their order in the canonical SMILES of the
+    substructure defined by canonical_smiles_pattern.
+    '''
+    sub_mol = Chem.MolFromSmarts(canonical_smiles_pattern)
+    matches = mol.GetSubstructMatches(sub_mol)
+    srt_aidxs = sorted(aidxs)
+
+    for match in matches:
+        srt_match = sorted(match)
+        if srt_aidxs == srt_match:
+            return tuple(match)
+
+    raise ValueError("Atom indices do not match any substructure defined by the pattern")

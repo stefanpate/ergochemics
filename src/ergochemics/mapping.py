@@ -511,5 +511,3 @@ def _fragment_chiral_tetrahedral_wo_ams(mol: Chem.Mol, ctr_ids: int) -> str:
     am_sma = Chem.MolFragmentToSmarts(mol, atomsToUse=[ctr_ids] + neighbor_ids)
     sma = Chem.MolToSmarts(Chem.MolFromSmarts(am_sma))
     return sma
-
-operator_map_reaction
