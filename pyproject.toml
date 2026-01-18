@@ -12,6 +12,8 @@ dependencies = [
     "pydantic>=2.10.6",
     "rdkit>=2024.9.5",
 ]
+license = "MIT"
+license-files = ["LICENSE*"]
 
 [build-system]
 requires = ["setuptools>=61"]
