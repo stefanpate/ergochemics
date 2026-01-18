@@ -1,6 +1,6 @@
 [project]
 name = "ergochemics"
-version = "0.1.1"
+version = "0.1.2"
 description = "Ergonomical cheminformatics library"
 readme = "README.md"
 authors = [
@@ -14,6 +14,9 @@ dependencies = [
 ]
 license = "MIT"
 license-files = ["LICENSE*"]
+
+[project.urls]
+"Source Code" = "https://github.com/stefanpate/ergochemics"
 
 [build-system]
 requires = ["setuptools>=61"]
