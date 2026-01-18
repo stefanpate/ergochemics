@@ -32,9 +32,9 @@ def draw_reaction(rxn: str, sub_img_size: tuple = (300, 200), use_smiles: bool =
         If True, is more explicit about double
         bond location in drawing
     draw_options:dict
-        Key-value pairs to set fields or call functions of rdkit.Chem.Draw.rdMolDraw2D.drawOptions. For
-        functions that take no arguments, set the value to None. For functions that take arguments, set the value to the argument.
-        For fields, set the value to the desired value.
+        Key-value pairs to set fields or call functions of rdkit.Chem.Draw.rdMolDraw2D.drawOptions.
+        For functions that take no arguments, set the value to None. For functions that take arguments,
+        set the value to the argument. For fields, set the value to the desired value.
 
         Examples:
             draw_options = {

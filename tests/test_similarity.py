@@ -1,4 +1,4 @@
-from ergochemics.similarity import MorganFingerprinter, MolFeaturizer, ReactionFeaturizer, rcmcs_similarity
+from ergochemics.similarity import MorganFingerprinter, MolFeaturizer, ReactionFingerprinter, rcmcs_similarity
 import numpy as np
 from rdkit import Chem
 
@@ -23,8 +23,8 @@ def test_molecule_fingerprinter_scramble_rc_order():
         length=2048,
         mol_featurizer=MolFeaturizer(),
     )
-    fp1 = mfper.fingerprint(Chem.MolFromSmiles(sma1), rc1, rc_dist_ub=1)
-    fp2 = mfper.fingerprint(Chem.MolFromSmiles(sma2), rc2, rc_dist_ub=1)
+    fp1 = mfper.fingerprint(Chem.MolFromSmiles(sma1), reaction_center=rc1, rc_dist_ub=1)
+    fp2 = mfper.fingerprint(Chem.MolFromSmiles(sma2), reaction_center=rc2, rc_dist_ub=1)
     assert np.allclose(fp1, fp2)  # Should be True if fingerprints are equal
 
 sma1 = "CCO.C(=O)O"
@@ -38,15 +38,15 @@ def test_molecule_fingerprinter_scramble_smiles_order():
         length=2048,
         mol_featurizer=MolFeaturizer(),
     )
-    fp1 = mfper.fingerprint(Chem.MolFromSmiles(sma1), rc1)
-    fp2 = mfper.fingerprint(Chem.MolFromSmiles(sma2), rc2)
+    fp1 = mfper.fingerprint(Chem.MolFromSmiles(sma1), reaction_center=rc1)
+    fp2 = mfper.fingerprint(Chem.MolFromSmiles(sma2), reaction_center=rc2)
     assert np.allclose(fp1, fp2)  # Should be True if fingerprints are equal
 
 am_rxn = '[NH2:2][CH:1]([CH2:3][OH:4])[C:5](=[O:7])[OH:6]>>[NH2:2][CH2:1][CH2:3][OH:4].[O:6]=[C:5]=[O:7]'
 rxn = 'NC(CO)C(=O)O>>NCCO.O=C=O'
 
-def test_reaction_fingerprinter():
-    rfper = ReactionFeaturizer(
+def test_reaction_fingerprinter_uses_rc():
+    rfper = ReactionFingerprinter(
         radius=2,
         length=2048,
         mol_featurizer=MolFeaturizer(),

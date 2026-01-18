@@ -15,9 +15,13 @@ def _handle_kwargs(**kwargs) -> dict:
         'max_tautomers':50,
         'quiet': True,
     }
-    filtered_kwargs = {k : v for k, v in kwargs.items() if k in default_kwargs}
+    filtered_kwargs = {}
+    for k, v in kwargs.items():
+        if k not in default_kwargs:
+            raise ValueError(f"Unknown keyword argument: {k}")
+        filtered_kwargs[k] = v
+
     default_kwargs.update(filtered_kwargs)
-    
     return default_kwargs
 
 def standardize_mol(mol: Chem.Mol, **kwargs) -> Chem.Mol:
@@ -259,14 +263,14 @@ def fast_tautomerize(smiles: str) -> list[str]:
     
     return [smiles] + list(set(tautomer_smiles))
 
-def hash_compound(cpd: str) -> str:
+def hash_molecule(cpd: str) -> str:
     """
-    Generate a hash for a compound based on its SMILES representation.
+    Generate a hash for a molecule based on its SMILES representation.
 
     Args
     ----
     smiles:str
-        SMILES string of the compound.
+        SMILES string of the molecule.
 
     Returns
     -------

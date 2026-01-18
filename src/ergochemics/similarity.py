@@ -34,7 +34,7 @@ def rcmcs_similarity(
     average:str
         How to average the rcmcs scores of the reactants. If 'weighted',
         the average is weighted by the number of atoms in each reactant
-        / product. If 'simple', the average is the arithmetic mean.
+        or product. If 'simple', the average is the arithmetic mean.
 
     Returns
     -------
@@ -59,7 +59,7 @@ def rcmcs_similarity(
     lrc1, rrc1 = [Chem.MolFragmentToSmiles(mol, atomsToUse=rc_idx) for mol, rc_idx in zip([lhs1, rhs1], [lrc_idx1, rrc_idx1])]
     lrc2, rrc2 = [Chem.MolFragmentToSmiles(mol, atomsToUse=rc_idx) for mol, rc_idx in zip([lhs2, rhs2], [lrc_idx2, rrc_idx2])]
 
-    if (lrc1 != lrc2 and rrc1 != rrc2) and (lrc1 != rrc2 and rrc1 != lrc2):
+    if (lrc1 != lrc2 or rrc1 != rrc2) and (lrc1 != rrc2 or rrc1 != lrc2):
         return 0.0  # No common reaction center structure
     
     if lrc1 == rrc2:
@@ -285,6 +285,9 @@ def dai(atom: Chem.Atom) -> list[int | float]:
     return dai
 
 def dai_amphoteros(atom: Chem.Atom) -> list[int | float]:
+    '''
+    Returns Daylight atomic invariants + amphoteros oxidation state for atom
+    '''
     atomic_invariants = [
         atom.GetDegree(),
         atom.GetTotalValence() - atom.GetTotalNumHs(),
@@ -298,6 +301,10 @@ def dai_amphoteros(atom: Chem.Atom) -> list[int | float]:
     return atomic_invariants
 
 def rule_default(atom: Chem.Atom) -> list[int | float]:
+    '''
+    Returns atom features used in reaction rule extraction
+    here: https://github.com/stefanpate/coarse-grain-rxns
+    '''
     atomic_invariants = [
         atom.GetDegree(),
         atom.GetTotalValence(),
@@ -434,7 +441,7 @@ class MorganFingerprinter:
         }
         self.mol_featurizer = mol_featurizer
 
-    def fingerprint(self, mol: Chem.Mol, reaction_center: Iterable[int] = [], output_type: str = 'bit', rc_dist_ub: int = None) -> np.ndarray:
+    def fingerprint(self, mol: Chem.Mol, output_type: str = 'bit', reaction_center: Iterable[int] = [], rc_dist_ub: int = None) -> np.ndarray:
         '''
         Fingerprints molecule.
 
@@ -442,14 +449,14 @@ class MorganFingerprinter:
         ----
         mol:Chem.Mol
             RDKit molecule object
-        reaction_center:Iterable[int] = []
-            List of atom indices corresponding to reaction center
         output_type:str = 'bit'
             Type of fingerprint to return. 'bit' for binary fingerprint,
             'count' for count-based fingerprint.
+        reaction_center:Iterable[int] = []
+            List of atom indices corresponding to reaction center
         rc_dist_ub:int = None
-            Upper bound on distance from reaction center for atoms to include
-            in fingerprint. If None, all atoms are included.
+            Upper bound (inclusive) on bondwise distance from reaction center
+            for atoms to include in fingerprint. If None, all atoms are included.
 
         Returns
         -------
@@ -520,7 +527,7 @@ class MorganFingerprinter:
         else:
             return tuple()
 
-class ReactionFeaturizer(MorganFingerprinter):
+class ReactionFingerprinter(MorganFingerprinter):
     '''
     Convenience class to fingerprint reactions.
     '''
@@ -539,7 +546,7 @@ class ReactionFeaturizer(MorganFingerprinter):
         '''
         super().__init__(radius, length, mol_featurizer, allocate_ao, **kwargs)
 
-    def fingerprint(self, rxn: str, use_rc: bool = False, output_type: str = 'bit', rc_dist_ub: int = None) -> np.ndarray:
+    def fingerprint(self, rxn: str, output_type: str = 'bit', use_rc: bool = False, rc_dist_ub: int = None) -> np.ndarray:
         '''
         Fingerprints reaction
 
@@ -551,6 +558,8 @@ class ReactionFeaturizer(MorganFingerprinter):
         output_type:str = 'bit'
             Type of fingerprint to return. 'bit' for binary fingerprint,
             'count' for count-based fingerprint.
+        use_rc:bool = False
+            Whether to use min distance to reaction center as an atom feature.
         rc_dist_ub:int = None
             Upper bound on distance from reaction center for atoms to include
             in fingerprint. If None, all atoms are included.

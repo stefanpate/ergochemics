@@ -9,7 +9,7 @@ def test_operator_map_reaction():
     assert res.did_map
     assert res.aligned_smarts == 'NC(CO)C(=O)O>>NCCO.O=C=O'
     assert res.atom_mapped_smarts == '[NH2:2][CH:1]([CH2:3][OH:4])[C:5](=[O:7])[OH:6]>>[NH2:2][CH2:1][CH2:3][OH:4].[O:6]=[C:5]=[O:7]'
-    assert res.reaction_center == (((1, 4, 6),), ((1,), (0, 1)))
+    assert res.template_aidxs == (((1, 4, 6),), ((1,), (0, 1)))
 
 tetrahedral_chiral_inversion = '[C:1][C:2][C@H:3]([C:4])[Br:5]>>[C:1][C:2][C@@H:3]([C:4])[Br:5]'
 stereo_double_bond_inversion = '[C:1]/[C:2]=[C:3]/[C:4]=[O:5]>>[C:1]/[C:2]=[C:3]\\[C:4]=[O:5]'

@@ -25,16 +25,16 @@ class OperatorMapResult(BaseModel):
         aligned to the operator reactants and products
     atom_mapped_smarts:str | None
         Reaction SMARTS with atom map numbers
-    reaction_center:tuple[tuple[int]] | None
-        Reaction center indices. Outer
+    template_aidxs:tuple[tuple[int]] | None
+        Template atom indices. Outer
         iterable is len 2,
         next iterable is len n rcts or n prods,
-        next is len(n rc atoms in molecule i)
+        next is len(n template_aidxs in molecule i)
     '''
     did_map: bool
     aligned_smarts: str | None = None
     atom_mapped_smarts: str | None = None
-    reaction_center: tuple[tuple[tuple[int, ...], ...], tuple[tuple[int, ...], ...]] | None = None
+    template_aidxs: tuple[tuple[tuple[int, ...], ...], tuple[tuple[int, ...], ...]] | None = None
 
 MAPPING_STANDARDIZATION_DEFAULTS = {
     'do_canon_taut':False,
@@ -103,11 +103,11 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
             aligned to the operator reactants and products
         - atom_mapped_smarts:str | None
             || Reaction SMARTS with atom map numbers
-        - reaction_center:tuple[tuple[int]] | None
-            || Reaction center indices. Outer
+        - template_aidxs:tuple[tuple[int]] | None
+            || Template atom indices. Outer
             iterable is len 2,
             next iterable is len n rcts or n prods,
-            next is len(n rc atoms in molecule i)
+            next is len(n template_aidxs in molecule i)
     '''
     try:
         rxn = _m_standardize_reaction(rxn, **MAPPING_STANDARDIZATION_DEFAULTS)
@@ -171,13 +171,13 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
                 correct_output = _compare_operator_outputs_w_products(outputs, taut_pdts)
 
                 if correct_output is not None:
-                    aligned_rxn, am_rxn, rhs_rc = _finalize_mapped_reaction(reactants=perm, output=correct_output, permuted_idxs=idx_perm, am_to_reactant_idx=am_to_reactant_idx)
-                    reaction_center = tuple([smc, rhs_rc])
+                    aligned_rxn, am_rxn, rhs_template_aidxs = _finalize_mapped_reaction(reactants=perm, output=correct_output, permuted_idxs=idx_perm, am_to_reactant_idx=am_to_reactant_idx)
+                    template_aidxs = tuple([smc, rhs_template_aidxs])
                     return OperatorMapResult(
                         did_map=True,
                         aligned_smarts=aligned_rxn,
                         atom_mapped_smarts=am_rxn,
-                        reaction_center=reaction_center
+                        template_aidxs=template_aidxs
                     )
 
                 # Deprotect & try again
@@ -316,7 +316,7 @@ def extract_operator_patts(smarts: str) -> tuple[tuple[str]]:
 
 def rc_to_str(rc: Iterable[Iterable[Iterable[int]]]) -> str:
     '''
-    Convert nested tuple representation of reaction center to string representation.
+    Convert nested tuple representation of atom indices (e.g., for reaction center) to string representation.
     If rc is a 2-level nested tuple, it is assumed this corresponds to the left-hand side 
     of the reaction.
     '''
@@ -336,7 +336,7 @@ def rc_to_str(rc: Iterable[Iterable[Iterable[int]]]) -> str:
 
 def rc_to_nest(rc: str) -> tuple[tuple[tuple[int]]]:
     '''
-    Convert string representation of reaction center to nested tuple representation.
+    Convert string representation of atom indices (e.g., for reaction center) to nested tuple representation.
     '''
     return tuple(
         tuple(
