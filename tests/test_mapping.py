@@ -21,3 +21,8 @@ def test_reaction_center_tetrahedral_inversion():
 def test_reaction_center_stereo_double_bond_inversion():
     rc_double_bond = get_reaction_center(stereo_double_bond_inversion, include_stereo=True)
     assert rc_double_bond == (((0, 1, 2, 3), ), ((0, 1, 2, 3), ))
+
+def test_reaction_center_non_consecutive_amns():
+    rxn = "[C:1][C:3]=[O:5]>>[C:1][C:3][O:5]"
+    rc = get_reaction_center(rxn)
+    assert rc == (((1, 2),), ((1, 2),))

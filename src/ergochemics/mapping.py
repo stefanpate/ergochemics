@@ -415,12 +415,15 @@ def get_reaction_center(am_rxn: str, mode: str = "separate", include_stereo: boo
     if len(amn_to_midx_aidx[0].keys() ^ amn_to_midx_aidx[1].keys()) != 0:
         raise ValueError("LHS and RHS atom maps do not perfectly intersect")
 
-    rc_amns = list(np.flatnonzero(D.sum(axis=1)) + 1)
+    srt_amns = sorted(amn_to_midx_aidx[0].keys())
+    rc_amns = [srt_amns[i] for i in np.flatnonzero(D.sum(axis=1))]
+    print(block_aidx_to_amn)
+    print(srt_idx)
+    print(rc_amns)
 
     if include_stereo:
         rc_amns = _add_stereo_double_bond_atoms(block_mols, rc_amns)
         rc_amns = _add_chiral_center_atoms(block_mols, rc_amns)
-    
     if mode == "separate":
         tmp = [[[] for _ in range(len(side))] for side in sides]
         for amn in rc_amns:
