@@ -25,11 +25,13 @@ class OperatorMapResult(BaseModel):
         aligned to the operator reactants and products
     atom_mapped_smarts:str | None
         Reaction SMARTS with atom map numbers
-    template_aidxs:tuple[tuple[int]] | None
+    template_aidxs:tuple[tuple[tuple[int]], tuple[tuple[int]]] | None
+    # TODO: Make this clearer. Maybe an example...
         Template atom indices. Outer
         iterable is len 2,
         next iterable is len n rcts or n prods,
-        next is len(n template_aidxs in molecule i)
+        next is len(n template_aidxs in molecule i). In the case of 
+        unbalanced rules, the RHS tuple will be a tuple with one empty tuple, i.e. ((),)
     '''
     did_map: bool
     aligned_smarts: str | None = None
@@ -75,7 +77,15 @@ def _tautomer_expand(lhs: Iterable[str], rhs: Iterable[str]) -> list[tuple[tuple
 
     return list(product(product(*lhs), product(*rhs)))
 
-def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> OperatorMapResult:
+def _add_explicit_hs(smi: str, return_dtype: str) -> str:
+    mol = Chem.MolFromSmiles(smi)
+    mol_h = Chem.AddHs(mol)
+    if return_dtype == 'mol':
+        return mol_h
+    elif return_dtype == 'smi':
+        return Chem.MolToSmiles(mol_h)
+
+def operator_map_reaction(rxn: str, operator: str, max_outputs: int = 10_000, explicit_hs: bool = False) -> OperatorMapResult:
     '''
     Attempts to map operator to reaction.
 
@@ -91,6 +101,10 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
         Reaction operator in SMARTS
     max_outputs:int
         Maximum number of outputs to generate w/ operator
+    explicit_hs:bool
+        If True, adds explicit hydrogens to all reactants
+        and products before mapping. Set to True if operator
+        specifies explicit hydrogens, False otherwise.
 
     Returns
     -------
@@ -124,8 +138,13 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
     op = rdChemReactions.ReactionFromSmarts(operator) # Make reaction object from smarts string
 
     for taut_rcts, taut_pdts in _tautomer_expand(rcts, pdts): # Iterate over tautomer combinations
-        
-        rcts_mol = [Chem.MolFromSmiles(r) for r in taut_rcts]
+
+        if explicit_hs:
+            taut_rcts = [_add_explicit_hs(r, return_dtype='smi') for r in taut_rcts]
+            taut_pdts = [_add_explicit_hs(p, return_dtype='smi') for p in taut_pdts]
+            rcts_mol = [_add_explicit_hs(r, return_dtype='mol') for r in taut_rcts]
+        else:
+            rcts_mol = [Chem.MolFromSmiles(r) for r in taut_rcts]
 
         if any([m is None for m in rcts_mol]):
             print(f"Error parsing tautomerized reactant for: {rxn}")
@@ -148,6 +167,7 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs=10_000) -> Operat
         matched_idxs = permutations([i for i in range(len(taut_rcts))])
 
         lhs_patts = [Chem.MolFromSmarts(l) for l in op_lhs]
+
         for idx_perm in matched_idxs:
             perm = [rcts_mol[idx] for idx in idx_perm]
             substruct_matches = [perm[i].GetSubstructMatches(lp) for i, lp in enumerate(lhs_patts)]
@@ -242,14 +262,16 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
             props = atom.GetPropsAsDict()
             rct_atom_idx = props.get('react_atom_idx')
             rct_idx = props.get('reactant_idx')
+            old_am = props.get('old_mapno')
             
             if rct_idx is not None:
                 reactants[permuted_idxs.index(rct_idx)].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
-            else:
-                old_am = props.get('old_mapno')
+            elif old_am is not None:
                 rct_idx = am_to_reactant_idx[old_am]
                 reactants[rct_idx].GetAtomWithIdx(rct_atom_idx).SetAtomMapNum(am)
                 rhs_am_rc.append(atom.GetAtomMapNum())
+            else:
+                return aligned_no_am, None, ((),) # Mapping failed, return SMARTS w/o AAM. Designed for unbalanced rules
                 
             am += 1
 
@@ -260,7 +282,7 @@ def _finalize_mapped_reaction(reactants: Iterable[Chem.Mol], output: Iterable[Ch
         rhs_am_smiles = [Chem.MolToSmiles(m, ignoreAtomMapNumbers=True) for m in output]
     except Exception as e:
         if e.__class__.__name__ == 'ArgumentError':
-            raise ValueError("RDKit ArgumentError encountered when generating SMILES from reaction output. Returning unmapped result.")
+            raise ValueError(e)
         
     rhs_am_recap = [Chem.MolFromSmiles(smi) for smi in rhs_am_smiles]
     rhs_rc = []
