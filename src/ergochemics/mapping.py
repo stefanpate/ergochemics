@@ -26,12 +26,22 @@ class OperatorMapResult(BaseModel):
     atom_mapped_smarts:str | None
         Reaction SMARTS with atom map numbers
     template_aidxs:tuple[tuple[tuple[int]], tuple[tuple[int]]] | None
-    # TODO: Make this clearer. Maybe an example...
-        Template atom indices. Outer
-        iterable is len 2,
-        next iterable is len n rcts or n prods,
-        next is len(n template_aidxs in molecule i). In the case of 
-        unbalanced rules, the RHS tuple will be a tuple with one empty tuple, i.e. ((),)
+        Outermost tuple of length two has an element for each side of
+        the reaction. Within each side's tuple there are as many tuples
+        as there are number of reactants (LHS) or products (RHS). In each
+        of these bottom level tuples are the atom indices which matched the 
+        template. In the case of unbalanced rules, the RHS tuple will be a 
+        tuple with one empty tuple, i.e. ((),)
+
+        Example: (
+            ( # LHS
+                (0, 1), # Reactant 1 has template match at atom indices 0 and 1
+                (0,) # Reactant 2 has template match at atom index 0
+            ),
+            ( # RHS
+                (0, 1) # Product 1 has template match at atom indices 0 and 1
+            )
+        )
     '''
     did_map: bool
     aligned_smarts: str | None = None
@@ -117,11 +127,23 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs: int = 10_000, ex
             aligned to the operator reactants and products
         - atom_mapped_smarts:str | None
             || Reaction SMARTS with atom map numbers
-        - template_aidxs:tuple[tuple[int]] | None
-            || Template atom indices. Outer
-            iterable is len 2,
-            next iterable is len n rcts or n prods,
-            next is len(n template_aidxs in molecule i)
+        - template_aidxs:tuple[tuple[tuple[int]], tuple[tuple[int]]] | None
+           || Outermost tuple of length two has an element for each side of
+           || the reaction. Within each side's tuple there are as many tuples
+           || as there are number of reactants (LHS) or products (RHS). In each
+           || of these bottom level tuples are the atom indices which matched the 
+           || template. In the case of unbalanced rules, the RHS tuple will be a 
+           || tuple with one empty tuple, i.e. ((),)
+           ||
+           || Example: (
+           ||     ( # LHS
+           ||         (0, 1), # Reactant 1 has template match at atom indices 0 and 1
+           ||         (0,) # Reactant 2 has template match at atom index 0
+           ||     ),
+           ||     ( # RHS
+           ||         (0, 1) # Product 1 has template match at atom indices 0 and 1
+           ||     )
+           || )
     '''
     try:
         rxn = _m_standardize_reaction(rxn, **MAPPING_STANDARDIZATION_DEFAULTS)
