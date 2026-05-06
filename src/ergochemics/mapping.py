@@ -1,4 +1,4 @@
-from rdkit import Chem
+from rdkit import Chem, rdBase
 from rdkit.Chem import rdChemReactions
 from rdkit.Chem.rdchem import ChiralType
 import re
@@ -95,7 +95,7 @@ def _add_explicit_hs(smi: str, return_dtype: str) -> str:
     elif return_dtype == 'smi':
         return Chem.MolToSmiles(mol_h)
 
-def operator_map_reaction(rxn: str, operator: str, max_outputs: int = 10_000, explicit_hs: bool = False) -> OperatorMapResult:
+def operator_map_reaction(rxn: str, operator: str, max_outputs: int = 10_000, explicit_hs: bool = False, quiet: bool = False) -> OperatorMapResult:
     '''
     Attempts to map operator to reaction.
 
@@ -115,6 +115,8 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs: int = 10_000, ex
         If True, adds explicit hydrogens to all reactants
         and products before mapping. Set to True if operator
         specifies explicit hydrogens, False otherwise.
+    quiet:bool
+        If True, suppresses RDKit output.
 
     Returns
     -------
@@ -145,6 +147,9 @@ def operator_map_reaction(rxn: str, operator: str, max_outputs: int = 10_000, ex
            ||     )
            || )
     '''
+    if quiet:
+        _ = rdBase.BlockLogs()
+
     try:
         rxn = _m_standardize_reaction(rxn, **MAPPING_STANDARDIZATION_DEFAULTS)
     except:
